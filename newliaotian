@@ -1,0 +1,2297 @@
+Copilot Chat
+Diagnosing ArkhamHorror server issues
+liaotianjilu.txt
+You said: @dylansils/my-files/files/liaotianjilu.txt 这是我们之前的聊天记录
+@dylansils/my-files/files/liaotianjilu.txt 这是我们之前的聊天记录
+Copilot said: 我已经阅读了完整的聊天记录。让我继续帮你诊断问题。 ## 当前状况总结 根据聊天记录，已确认： - ✅ arkham-deckbuilder 的分享 API 工作正常（`/v1/public/share/<id>`
+我已经阅读了完整的聊天记录。让我继续帮你诊断问题。
+
+当前状况总结
+根据聊天记录，已确认：
+
+✅ arkham-deckbuilder 的分享 API 工作正常（/v1/public/share/<id> 返回正确数据）
+✅ 从 ArkhamHorror 页面（3443）fetch 到 3445 没有 CORS 问题
+✅ ArkhamDbDeck.vue 源码修改正确
+❌ 问题：粘贴分享链接后，loadDeck() 函数没有被触发——Network 里没有任何请求
+关键发现是 3443 端口代理转发到的是 Vite dev server（端口3000），但 ArkhamHorror 前端也有 dist 目录存在。
+
+你的 https-proxy.js 把 3443 请求转发到 localhost:3000，而你确实有 Vite dev 进程在运行。但所有 input 的 __vueParentComponent 都是 false，这很异常。
+
+下一步诊断
+请运行以下命令：
+
+第一步：确认 Vite dev server 监听的端口
+
+PowerShell
+# 查看 Vite 配置
+Get-Content "D:\ArkhamHorror\frontend\vite.config.*" | Select-Object -First 30
+第二步：确认 Vite dev 实际监听的端口
+
+PowerShell
+netstat -ano | findstr "3000 5173"
+第三步：看看 https-proxy.js 的完整内容中 3443 怎么转发到前端的
+
+PowerShell
+Get-Content "D:\ArkhamHorror\https-proxy.js"
+第四步（最关键）：在浏览器中直接访问 Vite dev server
+
+在浏览器地址栏输入 http://127.0.0.1:3000���不是3443），看看能不能打开 ArkhamHorror。如果能打开，在那个页面测试粘贴分享链接。
+
+我怀疑的原因是：Vite dev server 可能不在 3000 端口（Vite 默认是 5173），导致 3443 代理实际上在 serve 旧的构建文件（dist），而不是 Vite 的热更新版本。这就解释了为什么你修改了 .vue 文件但页面上没有生效。
+
+把这几步结果告诉我！
+
+You said: 现在是https://192.168.43.178:3443/#/sign-in?nextUrl=/这个网页显示Service Unavailable Please try again later.
+现在是https://192.168.43.178:3443/#/sign-in?nextUrl=/这个网页显示Service Unavailable
+Please try again later.
+Copilot said: 这说明 **ArkhamHorror 的后端服务（端口3000）没有在运行**！3443 代理转发到 3000 端口，但 3000
+这说明 ArkhamHorror 的后端服务（端口3000）没有在运行！3443 代理转发到 3000 端口，但 3000 没有响应。
+
+请按顺序运行：
+
+第一步：确认当前哪些相关进程在运行
+
+PowerShell
+Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*ArkhamHorror*" -or $_.CommandLine -like "*3000*" -or $_.CommandLine -like "*vite*" } | Select-Object ProcessId, CommandLine
+第二步：确认 3000 端口有没有被监听
+
+PowerShell
+netstat -ano | findstr ":3000"
+第三步：查看 https-proxy.js 完整内容
+
+PowerShell
+Get-Content "D:\ArkhamHorror\https-proxy.js"
+第四步：查看 ArkhamHorror 的启动方式
+
+PowerShell
+# 看看有没有启动脚本
+Get-Content "D:\ArkhamHorror\package.json" | Select-String -Pattern "scripts" -Context 0,10
+之前的进程列表里有 vite dev 在运行，但现在 3443 返回 Service Unavailable，说明 Vite dev server 可能崩溃了或者端口不对。
+
+把这四步结果粘贴给我，我来帮你把服务重新启动起来！
+
+You said: PS D:\arkham-deckbuilder\frontend> netstat -ano | findstr ":3000"
+PS D:\arkham-deckbuilder\frontend> netstat -ano | findstr ":3000"
+  TCP    0.0.0.0:3000           0.0.0.0:0              LISTENING       20268
+  TCP    [::]:3000              [::]:0                 LISTENING       20268
+  TCP    [::1]:3000             [::]:0                 LISTENING       22488
+PS D:\arkham-deckbuilder\frontend> Get-Content "D:\ArkhamHorror\https-proxy.js"
+const https = require("https");
+const http = require("http");
+const fs = require("fs");
+const path = require("path");
+const net = require("net");
+const WebSocket = require("ws");
+const os = require("os");
+
+const options = {
+  cert: fs.readFileSync("D:\\ArkhamHorror\\server.pem"),
+  key: fs.readFileSync("D:\\ArkhamHorror\\server-key.pem")
+};
+
+function getLocalIP() {
+  const ifaces = os.networkInterfaces();
+  for (const name of Object.keys(ifaces)) {
+    for (const iface of ifaces[name]) {
+      if (iface.family === "IPv4" && !iface.internal) {
+        return iface.address;
+      }
+    }
+  }
+  return "127.0.0.1";
+}
+
+const localIP = getLocalIP();
+console.log("本机 IP:", localIP);
+
+// ========== 游戏主代理 (3443) ==========
+const gameServer = https.createServer(options, (req, res) => {
+  const proxy = http.request({
+    hostname: "127.0.0.1",
+    port: 8080,
+    path: req.url,
+    method: req.method,
+    headers: req.headers
+  }, (proxyRes) => {
+    res.writeHead(proxyRes.statusCode, proxyRes.headers);
+    proxyRes.pipe(res);
+  });
+  proxy.on("error", (e) => { res.writeHead(502); res.end("Proxy error: " + e.message); });
+  req.pipe(proxy);
+});
+
+gameServer.on("upgrade", (req, clientSocket, head) => {
+  if (req.url === "/chat") {
+    chatWss.handleUpgrade(req, clientSocket, head, (ws) => {
+      chatWss.emit("connection", ws, req);
+    });
+    return;
+  }
+  const proxySocket = net.connect(8080, "127.0.0.1", () => {
+    const headers = [`${req.method} ${req.url} HTTP/1.1`, `Host: 127.0.0.1:8080`];
+    for (let i = 0; i < req.rawHeaders.length; i += 2) {
+      const key = req.rawHeaders[i];
+      const val = req.rawHeaders[i + 1];
+      if (key.toLowerCase() === "host") continue;
+      headers.push(`${key}: ${val}`);
+    }
+    headers.push("", "");
+    proxySocket.write(headers.join("\r\n"));
+    if (head && head.length) proxySocket.write(head);
+    proxySocket.pipe(clientSocket);
+    clientSocket.pipe(proxySocket);
+  });
+  proxySocket.on("error", (e) => { console.error("WS proxy error:", e.message); clientSocket.destroy(); });
+  clientSocket.on("error", () => proxySocket.destroy());
+});
+
+gameServer.listen(3443, () => {
+  console.log("游戏服务运行在 https://" + localIP + ":3443");
+});
+
+// ========== 聊天室 ==========
+const chatWss = new WebSocket.Server({ noServer: true });
+const chatHistory = [];
+const MAX_HISTORY = 50;
+
+chatWss.on("connection", (ws) => {
+  if (chatHistory.length > 0) {
+    ws.send(JSON.stringify({ type: "history", messages: chatHistory }));
+  }
+  ws.on("message", (raw) => {
+    try {
+      const msg = JSON.parse(raw);
+      if (msg.type === "chat" && msg.name && msg.text) {
+        const record = {
+          name: msg.name.slice(0, 20),
+          text: msg.text.slice(0, 500),
+          time: new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })
+        };
+        chatHistory.push(record);
+        if (chatHistory.length > MAX_HISTORY) chatHistory.shift();
+        const payload = JSON.stringify({ type: "chat", ...record });
+        chatWss.clients.forEach(c => { if (c.readyState === WebSocket.OPEN) c.send(payload); });
+      }
+    } catch(e) {}
+  });
+});
+
+// ========== 本地 arkham.build 组牌器 (3445) ==========
+const deckDir = "D:\\arkham-deckbuilder\\frontend\\dist";
+
+// 外网 HTTPS 转发（带 CORS 头）
+function proxyToExternal(req, res, targetHost, targetPath, extraHeaders) {
+  const reqOpts = {
+    hostname: targetHost,
+    port: 443,
+    path: targetPath,
+    method: req.method,
+    headers: {
+      "host": targetHost,
+      "user-agent": "Mozilla/5.0 ArkhamLocal/1.0",
+      "accept": req.headers["accept"] || "*/*",
+      "accept-encoding": "gzip, deflate, br",
+      "accept-language": req.headers["accept-language"] || "en-US,en;q=0.9",
+      ...extraHeaders
+    }
+  };
+  const proxy = https.request(reqOpts, (proxyRes) => {
+    const respHeaders = {
+      ...proxyRes.headers,
+      "access-control-allow-origin": "*",
+      "access-control-allow-methods": "GET, POST, OPTIONS",
+      "access-control-allow-headers": "Content-Type, Authorization, X-Client-Id"
+    };
+    // 移除可能引起问题的头
+    delete respHeaders["content-security-policy"];
+    delete respHeaders["x-frame-options"];
+    res.writeHead(proxyRes.statusCode, respHeaders);
+    proxyRes.pipe(res);
+  });
+  proxy.on("error", (e) => {
+    console.error(`API proxy error [${targetHost}${targetPath}]:`, e.message);
+    res.writeHead(502);
+    res.end("API proxy error: " + e.message);
+  });
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    req.pipe(proxy);
+  } else {
+    proxy.end();
+  }
+}
+
+const deckServer = https.createServer(options, (req, res) => {
+  const url = req.url;
+
+  // OPTIONS 预检请求直接通过
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, {
+      "access-control-allow-origin": "*",
+      "access-control-allow-methods": "GET, POST, OPTIONS",
+      "access-control-allow-headers": "Content-Type, Authorization, X-Client-Id"
+    });
+    res.end();
+    return;
+  }
+
+  // 代理 arkham.build 后端 API (/v1/ 路径)
+  // 分享相关请求转发到本地 API (3446)，其他转发到外网
+  if (url.startsWith("/v1/public/share")) {
+    console.log("[API-LOCAL] -> localhost:3446" + url);
+    const localProxy = http.request({
+      hostname: "127.0.0.1",
+      port: 3446,
+      path: url,
+      method: req.method,
+      headers: { ...req.headers, host: "127.0.0.1:3446" }
+    }, (proxyRes) => {
+      const respHeaders = { ...proxyRes.headers, "access-control-allow-origin": "*", "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS", "access-control-allow-headers": "Content-Type, X-Client-Id" };
+      res.writeHead(proxyRes.statusCode, respHeaders);
+      proxyRes.pipe(res);
+    });
+    localProxy.on("error", (e) => { console.error("Local API error:", e.message); res.writeHead(502); res.end("Local API error: " + e.message); });
+    if (req.method !== "GET" && req.method !== "HEAD") { req.pipe(localProxy); } else { localProxy.end(); }
+    return;
+  }
+  if (url.startsWith("/v1/")) {
+    console.log("[API] -> api.arkham.build" + url);
+    return proxyToExternal(req, res, "api.arkham.build", url);
+  }
+
+  // 代理卡牌图片 (/card-images/ 路径，对应 VITE_CARD_IMAGE_URL)
+  if (url.startsWith("/card-images/")) {
+    const assetPath = url.replace("/card-images", "");
+    console.log("[IMG] -> assets.arkham.build" + assetPath);
+    return proxyToExternal(req, res, "assets.arkham.build", assetPath);
+  }
+
+  // 代理 arkhamdb 牌组同步相关 API
+  if (url.startsWith("/api/public/") || url.startsWith("/api/")) {
+    console.log("[ARKHAMDB] -> arkhamdb.com" + url);
+    return proxyToExternal(req, res, "arkhamdb.com", url);
+  }
+
+  // 静态文件服务
+  let urlPath = url.split("?")[0];
+  let filePath = path.join(deckDir, urlPath);
+
+  if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+    filePath = path.join(deckDir, "index.html");
+  }
+
+  const ext = path.extname(filePath).toLowerCase();
+  const mime = {
+    ".html": "text/html; charset=utf-8",
+    ".js":   "application/javascript",
+    ".css":  "text/css",
+    ".json": "application/json",
+    ".png":  "image/png",
+    ".jpg":  "image/jpeg",
+    ".webp": "image/webp",
+    ".svg":  "image/svg+xml",
+    ".woff2":"font/woff2",
+    ".woff": "font/woff",
+    ".ttf":  "font/ttf",
+    ".ico":  "image/x-icon"
+  }[ext] || "application/octet-stream";
+
+  try {
+    const stat = fs.statSync(filePath);
+    res.writeHead(200, {
+      "Content-Type": mime,
+      "Content-Length": stat.size,
+      "Cache-Control": ext === ".html" ? "no-cache" : "max-age=86400",
+      "access-control-allow-origin": "*"
+    });
+    fs.createReadStream(filePath).pipe(res);
+  } catch(e) {
+    res.writeHead(404);
+    res.end("Not found");
+  }
+});
+
+deckServer.listen(3445, () => {
+  console.log("本地组牌器运行在 https://" + localIP + ":3445");
+});
+
+// ========== 音乐目录自动扫描 ==========
+const musicDir = "D:\\ArkhamHorror\\frontend\\public\\music";
+const listFile = path.join(musicDir, "list.json");
+
+function updateMusicList() {
+  try {
+    const files = fs.readdirSync(musicDir)
+      .filter(f => /\.(mp3|ogg|flac|wav|m4a|aac)$/i.test(f))
+      .sort();
+    fs.writeFileSync(listFile, JSON.stringify(files, null, 2), "utf8");
+    console.log("音乐列表已更新，共", files.length, "首");
+  } catch(e) {
+    console.error("更新音乐列表失败:", e.message);
+  }
+}
+
+updateMusicList();
+
+let debounceTimer = null;
+fs.watch(musicDir, (eventType, filename) => {
+  if (!filename) return;
+  if (/\.(mp3|ogg|flac|wav|m4a|aac)$/i.test(filename)) {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(updateMusicList, 1000);
+  }
+});
+
+console.log("音乐目录监听中:", musicDir);
+PS D:\arkham-deckbuilder\frontend> # 看看有没有启动脚本
+PS D:\arkham-deckbuilder\frontend> Get-Content "D:\ArkhamHorror\package.json" | Select-String -Pattern "scripts" -Context 0,10
+Copilot said: 找到关键问题了！ 看 `https-proxy.js` 里： ```javascript // 3443 代理转发到 8080 端口，不是
+找到关键问题了！
+
+看 https-proxy.js 里：
+
+JavaScript
+// 3443 代理转发到 8080 端口，不是 3000！
+const gameServer = https.createServer(options, (req, res) => {
+  const proxy = http.request({
+    hostname: "127.0.0.1",
+    port: 8080,  // ← 这里！
+而 netstat 显示 3000 端口在监听，但 8080 没有出现。3443 代理需要 8080 端口，但没有服务在 8080 上运行，所以返回 Service Unavailable。
+
+3000 端口是 ArkhamHorror 的 后端 Haskell 游戏服务器，而 8080 应该是 Vite dev server 或者某个前端+后端的组合端口。
+
+请运行：
+
+第一步：确认 8080 端口是否有人监听
+
+PowerShell
+netstat -ano | findstr ":8080"
+第二步：看看 ArkhamHorror 前端的 Vite 配置，确认它监听的端口
+
+PowerShell
+Get-Content "D:\ArkhamHorror\frontend\vite.config.*"
+第三步：看看之前是怎么启动 ArkhamHorror 的（package.json）
+
+PowerShell
+Get-Content "D:\ArkhamHorror\package.json"
+Get-Content "D:\ArkhamHorror\frontend\package.json" | Select-String -Pattern "scripts" -Context 0,10
+第四步：确认当前所有 ArkhamHorror 相关进程
+
+PowerShell
+Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*ArkhamHorror*" -or $_.CommandLine -like "*8080*" -or $_.CommandLine -like "*vite*" } | Select-Object ProcessId, CommandLine
+把结果贴给我——现在需要搞清楚 8080 端口的服务是什么、怎么启动它。
+
+You said: PS D:\arkham-deckbuilder\frontend> netstat -ano | findstr ":8080"
+PS D:\arkham-deckbuilder\frontend> netstat -ano | findstr ":8080"
+  TCP    0.0.0.0:8080           0.0.0.0:0              LISTENING       25056
+  TCP    127.0.0.1:8080         127.0.0.1:51612        ESTABLISHED     25056
+  TCP    127.0.0.1:51612        127.0.0.1:8080         ESTABLISHED     12220
+PS D:\arkham-deckbuilder\frontend> Get-Content "D:\ArkhamHorror\frontend\vite.config.*"
+import { fileURLToPath, URL } from 'node:url'
+
+import { defineConfig } from 'vite'
+import vue from '@vitejs/plugin-vue'
+
+// https://vitejs.dev/config/
+export default defineConfig({
+  plugins: [
+    vue(),
+  ],
+  resolve: {
+    alias: {
+      '@': fileURLToPath(new URL('./src', import.meta.url))
+    }
+  },
+  server: {
+    port: 8080, host: "0.0.0.0",
+    proxy: {
+      "^/api": {
+        target: "http://127.0.0.1:3002",
+        changeOrigin: true,
+        secure: false,
+        ws: true
+      },
+      "^/health": {
+        target: "http://127.0.0.1:3002",
+        changeOrigin: true,
+        secure: false,
+        ws: false
+      }
+    }
+  }
+})
+PS D:\arkham-deckbuilder\frontend> Get-Content "D:\ArkhamHorror\package.json"
+{
+  "dependencies": {
+    "ws": "^8.20.0"
+  }
+}
+PS D:\arkham-deckbuilder\frontend> Get-Content "D:\ArkhamHorror\frontend\package.json" | Select-String -Pattern "scripts" -Context 0,10
+
+>   "scripts": {
+      "dev": "vite dev",
+      "serve": "vite serve",
+      "build": "vite build",
+      "tc": "vue-tsc --noEmit -p tsconfig.json --composite false",
+>     "digest": "node ./scripts/digest.cjs"
+    },
+    "dependencies": {
+      "@fortawesome/fontawesome-svg-core": "^7.1.0",
+      "@fortawesome/free-brands-svg-icons": "^7.1.0",
+      "@fortawesome/free-solid-svg-icons": "^7.1.0",
+      "@fortawesome/vue-fontawesome": "^3.1.2",
+      "@headlessui/vue": "^1.7.23",
+      "@heroicons/vue": "^2.2.0",
+      "@vueuse/components": "^13.9.0",
+      "@vueuse/core": "^13.9.0",
+
+
+PS D:\arkham-deckbuilder\frontend> Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*ArkhamHorror*" -or $_.CommandLine -like "*8080*" -or $_.CommandLine -like "*vite*" } | Select-Object ProcessId, CommandLine
+
+ProcessId CommandLine
+--------- -----------
+    21816 "C:\Program Files\nodejs\node.exe" D:\ArkhamHorror\voice-server.js
+     1664 "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" "D:\ArkhamHorror\update-ip.ps1"
+    20412 "C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe" -Command cd D:\ArkhamHorror\frontend; npx vite...
+    25360 C:\WINDOWS\system32\cmd.exe /c ""C:\Program Files\nodejs\npx.cmd" vite dev"
+    15704 "C:\Program Files\nodejs\\node.exe"  "C:\Program Files\nodejs\\node_modules\npm\bin\npx-cli.js" vite dev
+    22444 C:\WINDOWS\system32\cmd.exe /d /s /c vite dev
+    25056 "node"   "D:\ArkhamHorror\frontend\node_modules\.bin\\..\vite\bin\vite.js" dev
+    13912 D:\ArkhamHorror\frontend\node_modules\@esbuild\win32-x64\esbuild.exe --service=0.25.9 --ping
+    22684 D:\ArkhamHorror\frontend\node_modules\sass-embedded-win32-x64\dart-sass\src\dart.exe D:\ArkhamHorror\front...
+    12220 "C:\Program Files\nodejs\node.exe" D:\ArkhamHorror\https-proxy.js
+Copilot said: 很好！现在一切清楚了： - **8080 端口**：Vite dev server 在运行 ✅ -
+很好！现在一切清楚了：
+
+8080 端口：Vite dev server 在运行 ✅
+3443 代理 → 转发到 8080 ✅
+Vite 配置 port: 8080，并且会把 /api 请求代理到 127.0.0.1:3002（后端游戏服务器）
+但你说 3443 显示 "Service Unavailable"——这可能是 后端服务（3002端口）没有运行，导致页面加载时 API 请求失败。
+
+请运行：
+
+第一步：确认后端 3002 端口是否在运行
+
+PowerShell
+netstat -ano | findstr ":3002"
+第二步：直接在浏览器测试 Vite dev server
+
+浏览器打开 http://127.0.0.1:8080（不是 3443），看看能不能加载页面。
+
+第三步：看看 3443 的具体错误
+
+PowerShell
+# 测试 3443 是否能连通
+[System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
+$r = [System.Net.WebClient]::new()
+$r.DownloadString("https://127.0.0.1:3443")
+第四步：确认后端游戏服务器怎么启动
+
+PowerShell
+# 查看有没有 Haskell/游戏后端进程
+Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*3002*" -or $_.CommandLine -like "*arkham-horror*" -or $_.CommandLine -like "*.exe*arkham*" } | Select-Object ProcessId, CommandLine
+把结果贴给我！之前能正常用说明后端之前是启动的，现在可能是某个进程崩溃了。
+
+You said: netstat -ano | findstr ":3002"，没有返回log,浏览器打开 http://127.0.0.1:8080（不是 3443），看看不能加载登录页面提示Service
+netstat -ano | findstr ":3002"，没有返回log,浏览器打开 http://127.0.0.1:8080（不是 3443），看看不能加载登录页面提示Service Unavailable
+Please try again later.
+PS D:\arkham-deckbuilder\frontend> # 查看有没有 Haskell/游戏后端进程
+PS D:\arkham-deckbuilder\frontend> Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*3002*" -or $_.CommandLine -like "*arkham-horror*" -or $_.CommandLine -like "*.exe*arkham*" } | Select-Object ProcessId, CommandLine
+
+ProcessId CommandLine
+--------- -----------
+    21816 "C:\Program Files\nodejs\node.exe" D:\ArkhamHorror\voice-server.js
+    12232 "C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe" -Command node D:\arkham-deckbuilder\local-shar...
+     7648 "C:\Program Files\nodejs\node.exe" D:\arkham-deckbuilder\local-share-api.cjs
+     1664 "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" "D:\ArkhamHorror\update-ip.ps1"
+    20412 "C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe" -Command cd D:\ArkhamHorror\frontend; npx vite...
+    22684 D:\ArkhamHorror\frontend\node_modules\sass-embedded-win32-x64\dart-sass\src\dart.exe D:\ArkhamHorror\front...
+    12220 "C:\Program Files\nodejs\node.exe" D:\ArkhamHorror\https-proxy.js
+Copilot said: 找到问题了！ **后端游戏服务器（3002端口）没有在运行！** Vite 把 `/api` 请求代理到 3002，但 3002
+找到问题了！
+
+后端游戏服务器（3002端口）没有在运行！ Vite 把 /api 请求代理到 3002，但 3002 没有任何进程在监听，所以页面返回 "Service Unavailable"。
+
+你需要启动 ArkhamHorror 的后端服务。请运行：
+
+第一步：找到后端可执行文件
+
+PowerShell
+# 查找后端程序
+Get-ChildItem -Path "D:\ArkhamHorror" -Filter "*.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object FullName
+第二步：同时看看有没有 stack/cabal 相关文件（Haskell 项目）
+
+PowerShell
+Test-Path "D:\ArkhamHorror\stack.yaml"
+Test-Path "D:\ArkhamHorror\*.cabal"
+Get-ChildItem "D:\ArkhamHorror\*.cabal" -ErrorAction SilentlyContinue | Select-Object Name
+第三步：看看之前是怎么启动的——有没有启动脚本
+
+PowerShell
+Get-ChildItem "D:\ArkhamHorror" -Filter "start*" -ErrorAction SilentlyContinue | Select-Object Name
+Get-ChildItem "D:\ArkhamHorror" -Filter "*.ps1" -ErrorAction SilentlyContinue | Select-Object Name
+Get-ChildItem "D:\ArkhamHorror" -Filter "*.bat" -ErrorAction SilentlyContinue | Select-Object Name
+第四步：看看 D:\ArkhamHorror 根目录有哪些文件
+
+PowerShell
+Get-ChildItem "D:\ArkhamHorror" -File | Select-Object Name
+把结果贴给我——我需要找到后端游戏服务器是什么程序、怎么启动它。这是之前一直能用的，所以一定有对应的可执行文件或启动脚本。
+
+You said: PS D:\arkham-deckbuilder\frontend> # 查找后端程序 PS D:\arkham-deckbuilder\frontend> Get-ChildItem -Path
+PS D:\arkham-deckbuilder\frontend> # 查找后端程序
+PS D:\arkham-deckbuilder\frontend> Get-ChildItem -Path "D:\ArkhamHorror" -Filter "*.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object FullName
+
+FullName
+--------
+D:\ArkhamHorror\mkcert.exe
+D:\ArkhamHorror\frontend\node_modules\@esbuild\win32-x64\esbuild.exe
+D:\ArkhamHorror\frontend\node_modules\sass-embedded-win32-x64\dart-sass\src\dart.exe
+
+
+PS D:\arkham-deckbuilder\frontend> Test-Path "D:\ArkhamHorror\stack.yaml"
+False
+PS D:\arkham-deckbuilder\frontend> Test-Path "D:\ArkhamHorror\*.cabal"
+False
+PS D:\arkham-deckbuilder\frontend> Get-ChildItem "D:\ArkhamHorror\*.cabal" -ErrorAction SilentlyContinue | Select-Object Name
+PS D:\arkham-deckbuilder\frontend> Get-ChildItem "D:\ArkhamHorror" -Filter "start*" -ErrorAction SilentlyContinue | Select-Object Name
+
+Name
+----
+start.sh
+
+
+PS D:\arkham-deckbuilder\frontend> Get-ChildItem "D:\ArkhamHorror" -Filter "*.ps1" -ErrorAction SilentlyContinue | Select-Object Name
+
+Name
+----
+update-cert.ps1
+update-ip.ps1
+
+
+PS D:\arkham-deckbuilder\frontend> Get-ChildItem "D:\ArkhamHorror" -Filter "*.bat" -ErrorAction SilentlyContinue | Select-Object Name
+PS D:\arkham-deckbuilder\frontend> Get-ChildItem "D:\ArkhamHorror" -File | Select-Object Name
+
+Name
+----
+.dir-locals.el
+.dockerignore
+.gitattributes
+.gitignore
+cert.der
+cert.pem
+cert.pfx
+check.sh
+crontasks
+docker-compose.yml
+Dockerfile
+flake.lock
+flake.nix
+https-proxy.js
+index-override.html
+install.sh
+key.pem
+local.nginxconf
+Makefile
+mkcert.exe
+package-lock.json
+package.json
+prod.nginxconf
+README.md
+server-key.pem
+server.pem
+setup.sql
+shell.nix
+start.sh
+tools-inject.js
+tools.html
+update-cert.ps1
+update-ip.ps1
+voice-server.js
+web-entrypoint.sh
+开机启动流程.txt
+更新证书的方法.txt
+音乐.txt
+Copilot said: 看到有个 `开机启动流程.txt`！这里面肯定写了怎么启动所有服务。 ```powershell Get-Content "D:\ArkhamHorror\开机启动流程.txt" ``` 同时看看 `start.sh` 和 `docker-compose.yml`： ```powershell Get-Content "D:\ArkhamHorror\start.sh" Get-Content
+看到有个 开机启动流程.txt！这里面肯定写了怎么启动所有服务。
+
+PowerShell
+Get-Content "D:\ArkhamHorror\开机启动流程.txt"
+同时看看 start.sh 和 docker-compose.yml：
+
+PowerShell
+Get-Content "D:\ArkhamHorror\start.sh"
+Get-Content "D:\ArkhamHorror\docker-compose.yml"
+把结果贴给我！
+
+update-ip.ps1
+start.sh
+docker-compose.yml
+You said: update-ip是没坏之前的启动脚本
+update-ip是没坏之前的启动脚本
+Copilot said: 完全明白了！ ## 问题根源 ArkhamHorror 的后端是一个 **Docker 容器**（`halogenandtoast/arkham-horror`），里面运行： - **Haskell 后端**
+完全明白了！
+
+问题根源
+ArkhamHorror 的后端是一个 Docker 容器（halogenandtoast/arkham-horror），里面运行：
+
+Haskell 后端 arkham-api，监听 3002 端口
+nginx，监听 3000 端口，代理到 3002
+但你的 update-ip.ps1 启动脚本里 只启动了 Node 进程（https-proxy、voice-server），没有启动 Docker 容器！
+
+Docker 容器映射的是 3000:3000，而你的 Vite dev server 也配置了 8080 端口代理到 3002。所以流程是：
+
+Code
+浏览器 → 3443(https-proxy) → 8080(Vite dev) → /api → 3002(Docker里的arkham-api)
+请运行：
+
+第一步：检查 Docker 容器状态
+
+PowerShell
+docker ps -a
+第二步：如果容器停了，启动它
+
+PowerShell
+cd D:\ArkhamHorror
+docker compose up -d
+第三步：等几秒后确认 3002 端口
+
+PowerShell
+Start-Sleep -Seconds 5
+netstat -ano | findstr ":3002 :3000"
+把结果贴给我！Docker 容器启动后，3002 端口就有了，整个链路就通了。
+
+You said: PS D:\arkham-deckbuilder\frontend> docker ps -a CONTAINER ID
+PS D:\arkham-deckbuilder\frontend> docker ps -a
+CONTAINER ID   IMAGE                                  COMMAND                   CREATED        STATUS       PORTS                                         NAMES
+ee391b928b4e   halogenandtoast/arkham-horror:latest   "/web-entrypoint.sh …"   20 hours ago   Up 2 hours   0.0.0.0:3000->3000/tcp, [::]:3000->3000/tcp   arkhamhorror-web-1
+92d722bc3872   postgres:14.6-alpine                   "docker-entrypoint.s…"   20 hours ago   Up 2 hours   127.0.0.1:5433->5432/tcp                      arkhamhorror-db-1
+PS D:\arkham-deckbuilder\frontend> cd D:\ArkhamHorror
+PS D:\ArkhamHorror> docker compose up -d
+[+] up 2/2
+ ✔ Container arkhamhorror-db-1  Running                                                                             0.0s
+ ✔ Container arkhamhorror-web-1 Running                                                                             0.0s
+PS D:\ArkhamHorror> Start-Sleep -Seconds 5
+PS D:\ArkhamHorror> netstat -ano | findstr ":3002 :3000"
+  TCP    0.0.0.0:3000           0.0.0.0:0              LISTENING       20268
+  TCP    [::]:3000              [::]:0                 LISTENING       20268
+  TCP    [::1]:3000             [::]:0                 LISTENING       22488
+Copilot said: Docker 容器在运行，3000 端口在监听，但 **3002 端口没有出现**！ 问题是：Docker 容器把 3000
+Docker 容器在运行，3000 端口在监听，但 3002 端口没有出现！
+
+问题是：Docker 容器把 3000 映射出来了（3000:3000），容器内部的 nginx 监听 3000，然后转发到容器内部的 3002。3002 只在容器内部存在，外部看不到——这是正常的。
+
+但你的 Vite dev server 配置了代理到 127.0.0.1:3002，这是 错误的！应该代理到 127.0.0.1:3000（Docker 映射出来的端口）。
+
+等等——但 3000 端口被两个进程监听（PID 20268 和 22488），而且之前确认 PID 20268 是 Docker 的。PID 22488 是什么？
+
+PowerShell
+# 确认 22488 是什么进程
+Get-CimInstance Win32_Process -Filter "ProcessId = 22488" | Select-Object ProcessId, Name, CommandLine
+Get-CimInstance Win32_Process -Filter "ProcessId = 20268" | Select-Object ProcessId, Name, CommandLine
+同时测试一下现在页面能不能打开：
+
+PowerShell
+# 直接测试 3000 端口
+[System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
+$r = [System.Net.WebClient]::new()
+$r.DownloadString("http://127.0.0.1:3000/api/health")
+还有——最重要的——直接在浏览器打开 https://192.168.43.178:3443，看看现在能不能加载了？
+
+把结果告诉我！
+
+You said: PS D:\ArkhamHorror> # 确认 22488 是什么进程 PS D:\ArkhamHorror>
+PS D:\ArkhamHorror> # 确认 22488 是什么进程
+PS D:\ArkhamHorror> Get-CimInstance Win32_Process -Filter "ProcessId = 22488" | Select-Object ProcessId, Name, CommandLine
+
+ProcessId Name         CommandLine
+--------- ----         -----------
+    22488 wslrelay.exe  --mode 2 --vm-id {0d61dc80-6523-4373-be8e-58caeb46d598} --handle 1412
+
+
+PS D:\ArkhamHorror> Get-CimInstance Win32_Process -Filter "ProcessId = 20268" | Select-Object ProcessId, Name, CommandLine
+
+ProcessId Name                   CommandLine
+--------- ----                   -----------
+    20268 com.docker.backend.exe "C:\Program Files\Docker\Docker\resources\com.docker.backend.exe" services
+
+
+PS D:\ArkhamHorror> # 直接测试 3000 端口
+PS D:\ArkhamHorror> [System.Net.ServicePointManager]::ServerCertificateValidationCallback = {$true}
+PS D:\ArkhamHorror> $r = [System.Net.WebClient]::new()
+PS D:\ArkhamHorror> $r.DownloadString("http://127.0.0.1:3000/api/health")
+使用“1”个参数调用“DownloadString”时发生异常:“远程服务器返回错误: (404) 未找到。”
+所在位置 行:1 字符: 1
++ $r.DownloadString("http://127.0.0.1:3000/api/health")
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (:) [], MethodInvocationException
+    + FullyQualifiedErrorId : WebException
+Copilot said: 404 说明 3000 端口能连通，只是没有 `/api/health` 这个路径。Docker 容器是正常运行的！ 现在的问题很明确：**Vite
+404 说明 3000 端口能连通，只是没有 /api/health 这个路径。Docker 容器是正常运行的！
+
+现在的问题很明确：Vite dev server 代理到 3002（容器内部端口），但 3002 在宿主机上不存在。应该代理到 3000（Docker 映射出来的端口）。
+
+但更重要的是——先试试现在页面能不能用：
+
+直接在浏览器打开 https://192.168.43.178:3443，看看能不能加载？
+
+因为请求链路是：
+
+Code
+浏览器 → 3443(https-proxy) → 8080(Vite dev) → /api → 3002 ❌
+Vite 代理到 3002 会失败，所以页面应该还是不行。
+
+修复方法：把 Vite 的代理目标从 3002 改成 3000
+
+PowerShell
+# 查看当前 vite.config.ts 内容确认
+Get-Content "D:\ArkhamHorror\frontend\vite.config.ts"
+然后修改 vite.config.ts，把两处 3002 改成 3000：
+
+PowerShell
+(Get-Content "D:\ArkhamHorror\frontend\vite.config.ts") -replace 'http://127.0.0.1:3002', 'http://127.0.0.1:3000' | Set-Content "D:\ArkhamHorror\frontend\vite.config.ts"
+然后重启 Vite dev server：
+
+PowerShell
+# 先杀掉 Vite dev 进程
+Stop-Process -Id 25056 -Force
+
+# 重启
+Start-Process powershell -ArgumentList "-Command cd D:\ArkhamHorror\frontend; npx vite dev" -WindowStyle Minimized
+
+# 等几秒
+Start-Sleep -Seconds 5
+
+# 确认 8080 重新监听
+netstat -ano | findstr ":8080"
+然后刷新浏览器 https://192.168.43.178:3443，告诉我能不能加载了！
+
+You said: 我是没有代码基础的人完全不懂代码，请一个步骤做完我反馈后再告诉我下一步干嘛
+我是没有代码基础的人完全不懂代码，请一个步骤做完我反馈后再告诉我下一步干嘛
+Copilot said: 好的！一步一步来。 **现在请运行这一条命令：** ```powershell (Get-Content "D:\ArkhamHorror\frontend\vite.config.ts") -replace 'http://127.0.0.1:3002', 'http://127.0.0.1:3000' | Set-Content
+好的！一步一步来。
+
+现在请运行这一条命令：
+
+PowerShell
+(Get-Content "D:\ArkhamHorror\frontend\vite.config.ts") -replace 'http://127.0.0.1:3002', 'http://127.0.0.1:3000' | Set-Content "D:\ArkhamHorror\frontend\vite.config.ts"
+运行完后把结果告诉我。
+
+You said: PS D:\ArkhamHorror> (Get-Content "D:\ArkhamHorror\frontend\vite.config.ts") -replace 'http://127.0.0.1:3002', 'http://127.0.0.1:3000'
+PS D:\ArkhamHorror> (Get-Content "D:\ArkhamHorror\frontend\vite.config.ts") -replace 'http://127.0.0.1:3002', 'http://127.0.0.1:3000' | Set-Content "D:\ArkhamHorror\frontend\vite.config.ts"
+Get-Content : 找不到路径“D:\ArkhamHorror\frontend\vite.config.ts”，因为该路径不存在。
+所在位置 行:1 字符: 2
++ (Get-Content "D:\ArkhamHorror\frontend\vite.config.ts") -replace 'htt ...
++  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (D:\ArkhamHorror\frontend\vite.config.ts:String) [Get-Content], ItemNotF
+   oundException
+    + FullyQualifiedErrorId : PathNotFound,Microsoft.PowerShell.Commands.GetContentCommand
+Copilot said: 文件扩展名不是 `.ts`，之前看到是 `vite.config.*`。请运行： ```powershell (Get-Content "D:\ArkhamHorror\frontend\vite.config.js") -replace 'http://127.0.0.1:3002', 'http://127.0.0.1:3000'
+文件扩展名不是 .ts，之前看到是 vite.config.*。请运行：
+
+PowerShell
+(Get-Content "D:\ArkhamHorror\frontend\vite.config.js") -replace 'http://127.0.0.1:3002', 'http://127.0.0.1:3000' | Set-Content "D:\ArkhamHorror\frontend\vite.config.js"
+运行完把结果告诉我。
+
+You said: 没有反馈
+没有反馈
+Copilot said: 没有反馈就是成功了！ **下一步：确认修改是否正确，运行这条命令：** ```powershell Get-Content "D:\ArkhamHorror\frontend\vite.config.js" ``` 把结果贴给我。
+没有反馈就是成功了！
+
+下一步：确认修改是否正确，运行这条命令：
+
+PowerShell
+Get-Content "D:\ArkhamHorror\frontend\vite.config.js"
+把结果贴给我。
+
+You said: import { fileURLToPath, URL } from 'node:url' import
+import { fileURLToPath, URL } from 'node:url'
+
+import { defineConfig } from 'vite'
+import vue from '@vitejs/plugin-vue'
+
+// https://vitejs.dev/config/
+export default defineConfig({
+  plugins: [
+    vue(),
+  ],
+  resolve: {
+    alias: {
+      '@': fileURLToPath(new URL('./src', import.meta.url))
+    }
+  },
+  server: {
+    port: 8080, host: "0.0.0.0",
+    proxy: {
+      "^/api": {
+        target: "http://127.0.0.1:3000",
+        changeOrigin: true,
+        secure: false,
+        ws: true
+      },
+      "^/health": {
+        target: "http://127.0.0.1:3000",
+        changeOrigin: true,
+        secure: false,
+        ws: false
+      }
+    }
+  }
+})
+Copilot said: 修改正确！现在 3002 已经改成 3000 了。 **下一步：重启 Vite dev
+修改正确！现在 3002 已经改成 3000 了。
+
+下一步：重启 Vite dev server。运行这条命令：
+
+PowerShell
+Stop-Process -Id 25056 -Force
+运行完把结果告诉我。
+
+You said: 没有反馈
+没有反馈
+Copilot said: 好的，成功了。 **下一步：重新启动 Vite dev server，运行这条命令：** ```powershell Start-Process powershell -ArgumentList "-Command
+好的，成功了。
+
+下一步：重新启动 Vite dev server，运行这条命令：
+
+PowerShell
+Start-Process powershell -ArgumentList "-Command cd D:\ArkhamHorror\frontend; npx vite dev" -WindowStyle Minimized
+运行完告诉我。
+
+You said: 弹出一个新的窗口显示Voice signaling server running on wss://port 3001
+弹出一个新的窗口显示Voice signaling server running on wss://port 3001
+Copilot said: 那个窗口是 voice-server，不是 Vite。可能是因为杀进程的时候把其他 Node 进程也影响了。 **现在请运行这条命令，确认 8080 端口有没有在监听：** ```powershell netstat
+那个窗口是 voice-server，不是 Vite。可能是因为杀进程的时候把其他 Node 进程也影响了。
+
+现在请运行这条命令，确认 8080 端口有没有在监听：
+
+PowerShell
+netstat -ano | findstr ":8080"
+把结果贴给我。
+
+You said: TCP 0.0.0.0:8080
+
+  TCP    0.0.0.0:8080           0.0.0.0:0              LISTENING       17516
+  TCP    127.0.0.1:8080         127.0.0.1:49675        TIME_WAIT       0
+  TCP    127.0.0.1:8080         127.0.0.1:50341        TIME_WAIT       0
+  TCP    127.0.0.1:8080         127.0.0.1:51311        TIME_WAIT       0
+  TCP    127.0.0.1:8080         127.0.0.1:52397        TIME_WAIT       0
+  TCP    127.0.0.1:8080         127.0.0.1:54029        TIME_WAIT       0
+  TCP    127.0.0.1:8080         127.0.0.1:54356        TIME_WAIT       0
+  TCP    127.0.0.1:8080         127.0.0.1:55339        TIME_WAIT       0
+  TCP    127.0.0.1:8080         127.0.0.1:56561        TIME_WAIT       0
+  TCP    127.0.0.1:8080         127.0.0.1:60215        TIME_WAIT       0
+  TCP    127.0.0.1:8080         127.0.0.1:65338        TIME_WAIT       0
+  TCP    127.0.0.1:51152        127.0.0.1:8080         TIME_WAIT       0
+  TCP    127.0.0.1:52952        127.0.0.1:8080         TIME_WAIT       0
+  TCP    127.0.0.1:53564        127.0.0.1:8080         TIME_WAIT       0
+  TCP    127.0.0.1:54936        127.0.0.1:8080         TIME_WAIT       0
+  TCP    127.0.0.1:55339        127.0.0.1:8080         TIME_WAIT       0
+  TCP    127.0.0.1:60541        127.0.0.1:8080         TIME_WAIT       0
+  TCP    127.0.0.1:60543        127.0.0.1:8080         TIME_WAIT       0
+  TCP    127.0.0.1:60545        127.0.0.1:8080         TIME_WAIT       0
+  TCP    127.0.0.1:60547        127.0.0.1:8080         TIME_WAIT       0
+  TCP    127.0.0.1:60549        127.0.0.1:8080         TIME_WAIT       0
+  TCP    127.0.0.1:61064        127.0.0.1:8080         TIME_WAIT       0
+Copilot said: 8080 端口在监听了！ **现在请在浏览器打开 `https://192.168.43.178:3443`，看看能不能加载页面了？** 告诉我结果。
+8080 端口在监听了！
+
+现在请在浏览器打开 https://192.168.43.178:3443，看看能不能加载页面了？
+
+告诉我结果。
+
+You said: 加载出来了
+加载出来了
+Copilot said: 太好了！🎉 **现在测试分享链接功能：** 1. 进入 NEW DECK 页面 2. 用 **Ctrl+V**
+太好了！🎉
+
+现在测试分享链接功能：
+
+进入 NEW DECK 页面
+用 Ctrl+V 粘贴这个链接：https://192.168.43.178:3445/share/gCipgbAGn0xic8F
+看看下方有没有出现牌组名字的下拉列表
+告诉我结果！
+
+You said: 有了！
+有了！
+Copilot said: 🎉🎉🎉 **完美！问题解决了！** ## 总结一下修复了什么 **问题原因：** Vite dev server 的代理配置把
+🎉🎉🎉 完美！问题解决了！
+
+总结一下修复了什么
+问题原因： Vite dev server 的代理配置把 /api 请求转发到了 127.0.0.1:3002，但 ArkhamHorror 后端运行在 Docker 容器里，对外映射的端口是 3000，不是 3002。3002 只在容器内部存在。
+
+修复方法： 把 D:\ArkhamHorror\frontend\vite.config.js 里的 http://127.0.0.1:3002 改成了 http://127.0.0.1:3000。
+
+⚠️ 注意： 你的 update-ip.ps1 启动脚本里没有启动 Vite dev server，之后如果换 IP 重启服务，需要手动运行：
+
+PowerShell
+cd D:\ArkhamHorror\frontend
+npx vite dev
+或者你想让我帮你把这条也加到 update-ip.ps1 脚本里，这样以后换 IP 就自动全部启动？
+
+update-ip.ps1
+v2
+You said: 希望！这是我的原脚本帮我修改成正确的版本，千万别修的打不开了
+希望！这是我的原脚本帮我修改成正确的版本，千万别修的打不开了
+Copilot said: 好的！我来帮你更新脚本。现在的脚本有两个问题需要修复： 1. **Vite 代理端口**：之前是 3002，需要确保是 3000 2. **缺少启动 Vite
+好的！我来帮你更新脚本。现在的脚本有两个问题需要修复：
+
+Vite 代理端口：之前是 3002，需要确保是 3000
+缺少启动 Vite dev server 和 local-share-api
+请运行这条命令，把修改后的脚本写入文件：
+
+PowerShell
+@'
+$ip = Read-Host "请输入新的IP地址（例如 192.168.1.100）"
+
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "  IP 地址将更新为: $ip" -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host ""
+
+Write-Host "[1/7] 正在停止所有 Node 进程..." -ForegroundColor Yellow
+taskkill /IM node.exe /F 2>$null
+Start-Sleep -Seconds 2
+Write-Host "  -> 已停止" -ForegroundColor Green
+
+Write-Host "[2/7] 正在生成新的 SSL 证书..." -ForegroundColor Yellow
+Remove-Item "D:\ArkhamHorror\server.pem" -ErrorAction SilentlyContinue -Force
+Remove-Item "D:\ArkhamHorror\server-key.pem" -ErrorAction SilentlyContinue -Force
+Push-Location "D:\ArkhamHorror"
+.\mkcert.exe $ip
+Pop-Location
+Rename-Item "D:\ArkhamHorror\$ip.pem" "server.pem" -Force
+Rename-Item "D:\ArkhamHorror\$ip-key.pem" "server-key.pem" -Force
+Write-Host "  -> 证书已更新" -ForegroundColor Green
+
+Write-Host "[3/7] 正在更新配置文件..." -ForegroundColor Yellow
+$timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+$lines = @(
+    "# 本地私人 arkham.build 配置",
+    "# 自动生成于 $timestamp",
+    "# IP: $ip",
+    "",
+    "VITE_API_LEGACY_URL=https://${ip}:3445",
+    "VITE_CARD_IMAGE_URL=https://${ip}:3445/card-images",
+    "VITE_PAGE_NAME=arkham.build (本地)",
+    "VITE_ARKHAMDB_BASE_URL=https://arkhamdb.com",
+    "VITE_API_URL=https://${ip}:3445",
+    "VITE_SHOW_PREVIEW_BANNER=false"
+)
+$lines | Out-File -FilePath "D:\arkham-deckbuilder\frontend\.env" -Encoding UTF8
+Set-Content "D:\ArkhamHorror\frontend\.env" "VITE_ARKHAM_BUILD_API_URL=https://${ip}:3445"
+Write-Host "  -> 配置文件已更新" -ForegroundColor Green
+
+Write-Host "[4/7] 正在确保 Vite 代理端口正确..." -ForegroundColor Yellow
+(Get-Content "D:\ArkhamHorror\frontend\vite.config.js") -replace 'http://127.0.0.1:3002', 'http://127.0.0.1:3000' | Set-Content "D:\ArkhamHorror\frontend\vite.config.js"
+Write-Host "  -> Vite 代理端口已确认为 3000" -ForegroundColor Green
+
+Write-Host "[5/7] 正在重新编译前端（需要一点时间）..." -ForegroundColor Yellow
+Push-Location "D:\arkham-deckbuilder\frontend"
+npx vite build
+$buildResult2 = $LASTEXITCODE
+Pop-Location
+if ($buildResult2 -ne 0) {
+    Write-Host "  -> arkham-deckbuilder 前端编译失败！请检查错误信息" -ForegroundColor Red
+    Read-Host "按回车退出"
+    exit 1
+}
+Write-Host "  -> arkham-deckbuilder 前端编译完成" -ForegroundColor Green
+
+Write-Host "[6/7] 正在确保 Docker 容器运行..." -ForegroundColor Yellow
+Push-Location "D:\ArkhamHorror"
+docker compose up -d
+Pop-Location
+Start-Sleep -Seconds 3
+Write-Host "  -> Docker 容器已启动" -ForegroundColor Green
+
+Write-Host "[7/7] 正在重启所有服务..." -ForegroundColor Yellow
+Start-Process "node" -ArgumentList "D:\ArkhamHorror\https-proxy.js" -WindowStyle Minimized
+Start-Process "node" -ArgumentList "D:\ArkhamHorror\voice-server.js" -WindowStyle Minimized
+Start-Process "node" -ArgumentList "D:\arkham-deckbuilder\local-share-api.cjs" -WindowStyle Minimized
+Start-Process powershell -ArgumentList "-Command cd D:\ArkhamHorror\frontend; npx vite dev" -WindowStyle Minimized
+Start-Sleep -Seconds 3
+Write-Host "  -> 所有服务已启动" -ForegroundColor Green
+
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Green
+Write-Host "  全部完成！" -ForegroundColor Green
+Write-Host "========================================" -ForegroundColor Green
+Write-Host ""
+Write-Host "  ArkhamHorror 游戏:    https://${ip}:3443" -ForegroundColor Cyan
+Write-Host "  语音聊天:             wss://${ip}:3001" -ForegroundColor Cyan
+Write-Host "  Arkham 组牌器:        https://${ip}:3445" -ForegroundColor Cyan
+Write-Host ""
+Read-Host "按回车关闭窗口"
+'@ | Set-Content "D:\ArkhamHorror\update-ip.ps1" -Encoding UTF8
+运行完告诉我结果。
+
+You said: 好了
+好了
+Copilot said: 好的！确认一下写入是否正确： ```powershell Get-Content "D:\ArkhamHorror\update-ip.ps1" ``` 把结果贴给我。
+好的！确认一下写入是否正确：
+
+PowerShell
+Get-Content "D:\ArkhamHorror\update-ip.ps1"
+把结果贴给我。
+
+You said: PS D:\ArkhamHorror> Get-Content "D:\ArkhamHorror\update-ip.ps1" $ip = Read-Host "请输入新的IP地址（例如
+PS D:\ArkhamHorror> Get-Content "D:\ArkhamHorror\update-ip.ps1"
+$ip = Read-Host "请输入新的IP地址（例如 192.168.1.100）"
+
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "  IP 地址将更新为: $ip" -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host ""
+
+Write-Host "[1/7] 正在停止所有 Node 进程..." -ForegroundColor Yellow
+taskkill /IM node.exe /F 2>$null
+Start-Sleep -Seconds 2
+Write-Host "  -> 已停止" -ForegroundColor Green
+
+Write-Host "[2/7] 正在生成新的 SSL 证书..." -ForegroundColor Yellow
+Remove-Item "D:\ArkhamHorror\server.pem" -ErrorAction SilentlyContinue -Force
+Remove-Item "D:\ArkhamHorror\server-key.pem" -ErrorAction SilentlyContinue -Force
+Push-Location "D:\ArkhamHorror"
+.\mkcert.exe $ip
+Pop-Location
+Rename-Item "D:\ArkhamHorror\$ip.pem" "server.pem" -Force
+Rename-Item "D:\ArkhamHorror\$ip-key.pem" "server-key.pem" -Force
+Write-Host "  -> 证书已更新" -ForegroundColor Green
+
+Write-Host "[3/7] 正在更新配置文件..." -ForegroundColor Yellow
+$timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+$lines = @(
+    "# 本地私人 arkham.build 配置",
+    "# 自动生成于 $timestamp",
+    "# IP: $ip",
+    "",
+    "VITE_API_LEGACY_URL=https://${ip}:3445",
+    "VITE_CARD_IMAGE_URL=https://${ip}:3445/card-images",
+    "VITE_PAGE_NAME=arkham.build (本地)",
+    "VITE_ARKHAMDB_BASE_URL=https://arkhamdb.com",
+    "VITE_API_URL=https://${ip}:3445",
+    "VITE_SHOW_PREVIEW_BANNER=false"
+)
+$lines | Out-File -FilePath "D:\arkham-deckbuilder\frontend\.env" -Encoding UTF8
+Set-Content "D:\ArkhamHorror\frontend\.env" "VITE_ARKHAM_BUILD_API_URL=https://${ip}:3445"
+Write-Host "  -> 配置文件已更新" -ForegroundColor Green
+
+Write-Host "[4/7] 正在确保 Vite 代理端口正确..." -ForegroundColor Yellow
+(Get-Content "D:\ArkhamHorror\frontend\vite.config.js") -replace 'http://127.0.0.1:3002', 'http://127.0.0.1:3000' | Set-Content "D:\ArkhamHorror\frontend\vite.config.js"
+Write-Host "  -> Vite 代理端口已确认为 3000" -ForegroundColor Green
+
+Write-Host "[5/7] 正在重新编译前端（需要一点时间）..." -ForegroundColor Yellow
+Push-Location "D:\arkham-deckbuilder\frontend"
+npx vite build
+$buildResult2 = $LASTEXITCODE
+Pop-Location
+if ($buildResult2 -ne 0) {
+    Write-Host "  -> arkham-deckbuilder 前端编译失败！请检查错误信息" -ForegroundColor Red
+    Read-Host "按回车退出"
+    exit 1
+}
+Write-Host "  -> arkham-deckbuilder 前端编译完成" -ForegroundColor Green
+
+Write-Host "[6/7] 正在确保 Docker 容器运行..." -ForegroundColor Yellow
+Push-Location "D:\ArkhamHorror"
+docker compose up -d
+Pop-Location
+Start-Sleep -Seconds 3
+Write-Host "  -> Docker 容器已启动" -ForegroundColor Green
+
+Write-Host "[7/7] 正在重启所有服务..." -ForegroundColor Yellow
+Start-Process "node" -ArgumentList "D:\ArkhamHorror\https-proxy.js" -WindowStyle Minimized
+Start-Process "node" -ArgumentList "D:\ArkhamHorror\voice-server.js" -WindowStyle Minimized
+Start-Process "node" -ArgumentList "D:\arkham-deckbuilder\local-share-api.cjs" -WindowStyle Minimized
+Start-Process powershell -ArgumentList "-Command cd D:\ArkhamHorror\frontend; npx vite dev" -WindowStyle Minimized
+Start-Sleep -Seconds 3
+Write-Host "  -> 所有服务已启动" -ForegroundColor Green
+
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Green
+Write-Host "  全部完成！" -ForegroundColor Green
+Write-Host "========================================" -ForegroundColor Green
+Write-Host ""
+Write-Host "  ArkhamHorror 游戏:    https://${ip}:3443" -ForegroundColor Cyan
+Write-Host "  语音聊天:             wss://${ip}:3001" -ForegroundColor Cyan
+Write-Host "  Arkham 组牌器:        https://${ip}:3445" -ForegroundColor Cyan
+Write-Host ""
+Read-Host "按回车关闭窗口"
+Copilot said: ✅ 脚本完全正确！ ## 总结一下今天修复的所有内容 ### 修复1：Vite 代理端口 - **文件**：`D:\ArkhamHorror\frontend\vite.config.js` - **改动**：`3002`
+✅ 脚本完全正确！
+
+总结一下今天修复的所有内容
+修复1：Vite 代理端口
+文件：D:\ArkhamHorror\frontend\vite.config.js
+改动：3002 → 3000（Docker 容器对外映射的端口）
+修复2：update-ip.ps1 启动脚本
+新增了以下内容：
+
+[4/7] 自动确保 Vite 代理端口为 3000
+[6/7] 自动启动 Docker 容器
+[7/7] 额外启动了 local-share-api.cjs（分享功能）和 Vite dev server（ArkhamHorror 前端）
+以后换 IP 只需要运行 update-ip.ps1，所有服务会自动全部启动。
+
+现在你的完整功能链路是：
+
+Code
+组牌器(3445) 创建分享 → 复制链接 → ArkhamHorror(3443) NEW DECK 粘贴 → 读取牌组 ✅
+尽情享受游戏吧！🃏🎮
+
+You said: 那我关机后下次启动流程是什么
+那我关机后下次启动流程是什么
+Copilot said: 开机后按顺序做这 3 步： **第一步：启动 Docker Desktop** - 在桌面或开始菜单找到 **Docker
+开机后按顺序做这 3 步：
+
+第一步：启动 Docker Desktop
+
+在桌面或开始菜单找到 Docker Desktop，双击打开
+等它完全启动（托盘图标不再转圈）
+第二步：启动 Docker 容器
+
+PowerShell
+cd D:\ArkhamHorror
+docker compose up -d
+第三步：启动所有 Node 服务
+
+PowerShell
+Start-Process "node" -ArgumentList "D:\ArkhamHorror\https-proxy.js" -WindowStyle Minimized
+Start-Process "node" -ArgumentList "D:\ArkhamHorror\voice-server.js" -WindowStyle Minimized
+Start-Process "node" -ArgumentList "D:\arkham-deckbuilder\local-share-api.cjs" -WindowStyle Minimized
+Start-Process powershell -ArgumentList "-Command cd D:\ArkhamHorror\frontend; npx vite dev" -WindowStyle Minimized
+然后浏览器打开 https://192.168.43.178:3443 就能用了。
+
+⚠️ 注意： 如果你的 IP 地址变了（比如换了 WiFi），就不���用上面的步骤，而是运行 update-ip.ps1 脚本，它会自动处理所有事情。
+
+要不要我把第二步和第三步合并成一个 一键启动脚本，以后开机只需要双击一下就全部启动？
+
+You said: 很需要合并成一键启动脚本
+很需要合并成一键启动脚本
+Copilot said: 请运行这条命令： ```powershell @' Write-Host "" Write-Host "========================================" -ForegroundColor Cyan Write-Host "
+请运行这条命令：
+
+PowerShell
+@'
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "  ArkhamHorror 一键启动" -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host ""
+
+Write-Host "[1/3] 正在等待 Docker Desktop 就绪..." -ForegroundColor Yellow
+$ready = $false
+for ($i = 0; $i -lt 60; $i++) {
+    try {
+        $info = docker info 2>&1
+        if ($LASTEXITCODE -eq 0) { $ready = $true; break }
+    } catch {}
+    Start-Sleep -Seconds 2
+}
+if (-not $ready) {
+    Write-Host "  -> Docker Desktop 未就绪，请先手动启动 Docker Desktop！" -ForegroundColor Red
+    Read-Host "按回车退出"
+    exit 1
+}
+Write-Host "  -> Docker Desktop 已就绪" -ForegroundColor Green
+
+Write-Host "[2/3] 正在启动 Docker 容器..." -ForegroundColor Yellow
+Push-Location "D:\ArkhamHorror"
+docker compose up -d
+Pop-Location
+Start-Sleep -Seconds 3
+Write-Host "  -> Docker 容器已启动" -ForegroundColor Green
+
+Write-Host "[3/3] 正在启动所有服务..." -ForegroundColor Yellow
+Start-Process "node" -ArgumentList "D:\ArkhamHorror\https-proxy.js" -WindowStyle Minimized
+Start-Process "node" -ArgumentList "D:\ArkhamHorror\voice-server.js" -WindowStyle Minimized
+Start-Process "node" -ArgumentList "D:\arkham-deckbuilder\local-share-api.cjs" -WindowStyle Minimized
+Start-Process powershell -ArgumentList "-Command cd D:\ArkhamHorror\frontend; npx vite dev" -WindowStyle Minimized
+Start-Sleep -Seconds 3
+Write-Host "  -> 所有服务已启动" -ForegroundColor Green
+
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Green
+Write-Host "  全部完成！" -ForegroundColor Green
+Write-Host "========================================" -ForegroundColor Green
+Write-Host ""
+Write-Host "  ArkhamHorror 游戏:    https://192.168.43.178:3443" -ForegroundColor Cyan
+Write-Host "  语音聊天:             wss://192.168.43.178:3001" -ForegroundColor Cyan
+Write-Host "  Arkham 组牌器:        https://192.168.43.178:3445" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "  （如果 IP 地址变了，请改用 update-ip.ps1）" -ForegroundColor DarkYellow
+Write-Host ""
+Read-Host "按回车关闭窗口"
+'@ | Set-Content "D:\ArkhamHorror\start-all.ps1" -Encoding UTF8
+运行完告诉我。
+
+You said: 运行完了
+运行完了
+Copilot said: 好的！确认一下是否写入正确： ```powershell Test-Path "D:\ArkhamHorror\start-all.ps1" ``` 运行完告诉我。
+好的！确认一下是否写入正确：
+
+PowerShell
+Test-Path "D:\ArkhamHorror\start-all.ps1"
+运行完告诉我。
+
+You said: True
+True
+Copilot said: ✅ 脚本已创建成功！ ## 以后开机启动流程 1. **先启动 Docker Desktop**（双击桌面/开始菜单的 Docker
+✅ 脚本已创建成功！
+
+以后开机启动流程
+先启动 Docker Desktop（双击桌面/开始菜单的 Docker Desktop 图标）
+右键点击 D:\ArkhamHorror\start-all.ps1 → 用 PowerShell 运行
+就这两步，全部服务自动启动！
+
+💡 提示： 脚本会自动等待 Docker 就绪（最多等 2 分钟），所以 Docker Desktop 不需要完全启动好再运行脚本，启动了就可以马上双击脚本。
+
+⚠️ 换了 WiFi / IP 变了？ 那就不用 start-all.ps1，改用 update-ip.ps1。
+
+You said: 现在是只能访问我的本地私人arkhum.build了能不能在有网的时候也能访问公网的arkhamdb和公网的arkhum.build三个效果同时满足啊
+现在是只能访问我的本地私人arkhum.build了能不能在有网的时候也能访问公网的arkhamdb和公网的arkhum.build三个效果同时满足啊
+Copilot said: 可以的！现在分析一下你的情况： - **公网 arkhamdb.com** → 直接浏览器打开就能访问，不受影响 ✅ - **公网
+可以的！现在分析一下你的情况：
+
+公网 arkhamdb.com → 直接浏览器打开就能访问，不受影响 ✅
+公网 arkham.build → 直接浏览器打开就能访问，不受影响 ✅
+本地私人 arkham.build → https://192.168.43.178:3445 ✅
+这三个本来就是互不冲突的，因为它们是不同的网址：
+
+服务	地址
+公网 ArkhamDB	https://arkhamdb.com
+公网 arkham.build	https://arkham.build
+你的本地 arkham.build	https://192.168.43.178:3445
+你的本地 ArkhamHorror 游戏	https://192.168.43.178:3443
+现在有网的时候，你试试在浏览器分别打开：
+
+https://arkhamdb.com
+https://arkham.build
+看看能不能正常访问？如果能，那三个就已经同时满足了！
+
+You said: 你理解错了我的意思是让我的本地 ArkhamHorror 游戏的my deck界面现在是只能访问我的本地私人arkhum.build了能不能在有网的时候也能访问公网的arkhamdb和公网的arkhum.build三个效果同时满足啊
+你理解错了我的意思是让我的本地 ArkhamHorror 游戏的my deck界面现在是只能访问我的本地私人arkhum.build了能不能在有网的时候也能访问公网的arkhamdb和公网的arkhum.build三个效果同时满足啊
+Copilot said: 明白了！你的意思是在 ArkhamHorror 游戏（3443）的 NEW DECK 页面里： - ✅
+明白了！你的意思是在 ArkhamHorror 游戏（3443）的 NEW DECK 页面里：
+
+✅ 现在能粘贴 本地 arkham.build 的分享链接导入牌组
+❓ 也想能粘贴 公网 arkham.build 的分享链接导入牌组
+❓ 也想能粘贴 公网 arkhamdb.com 的链接导入牌组
+我需要先看看游戏是怎么处理这些链接的。请运行：
+
+PowerShell
+Get-Content "D:\ArkhamHorror\frontend\src\arkham\views\NewDeck.vue"
+把结果贴给我。
+
+You said: PS D:\ArkhamHorror> Get-Content "D:\ArkhamHorror\frontend\src\arkham\views\NewDeck.vue" Get-Content : 找不到路径“D:\ArkhamHorror\frontend\src\arkham\views\NewDeck.vue”，因为该路径不存在。 所在位置 行:1
+PS D:\ArkhamHorror> Get-Content "D:\ArkhamHorror\frontend\src\arkham\views\NewDeck.vue"
+Get-Content : 找不到路径“D:\ArkhamHorror\frontend\src\arkham\views\NewDeck.vue”，因为该路径不存在。
+所在位置 行:1 字符: 1
++ Get-Content "D:\ArkhamHorror\frontend\src\arkham\views\NewDeck.vue"
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : ObjectNotFound: (D:\ArkhamHorror...ews\NewDeck.vue:String) [Get-Content], ItemNotFoundEx
+   ception
+    + FullyQualifiedErrorId : PathNotFound,Microsoft.PowerShell.Commands.GetContentCommand
+Copilot said: 文件名可能不一样，先搜索一下： ```powershell Get-ChildItem "D:\ArkhamHorror\frontend\src" -Recurse -File | Where-Object {
+文件名可能不一样，先搜索一下：
+
+PowerShell
+Get-ChildItem "D:\ArkhamHorror\frontend\src" -Recurse -File | Where-Object { $_.Name -match "deck|Deck" } | Select-Object FullName
+把结果贴给我。
+
+You said: FullName -------- D:\ArkhamHorror\frontend\src\arkham\components\ArkhamDbDeck.vue D:\ArkhamHorror\frontend\src\arkham\components\ChooseDeck.vue D:\ArkhamHorror\frontend\src\arkham\components\DeckList.vue D:\ArkhamHorror\frontend\src\arkham\components\DeckRow.vue D:\ArkhamHorror\frontend\src\arkham\components\EncounterDeck.vue D:\ArkhamHorror\frontend\src\arkham\components\NewDeck.vue D:\ArkhamHorror\frontend\src\arkham\components\ScenarioDeck.vue D:\ArkhamHorror\frontend\src\arkham\components\UpgradeDeck.vue D:\ArkhamHorror\frontend\src\arkham\types\Deck.ts D:\ArkhamHorror\frontend\src\arkham\views\Deck.vue D:\ArkhamHorror\frontend\src\arkham\views\Decks.vue
+FullName
+--------
+D:\ArkhamHorror\frontend\src\arkham\components\ArkhamDbDeck.vue
+D:\ArkhamHorror\frontend\src\arkham\components\ChooseDeck.vue
+D:\ArkhamHorror\frontend\src\arkham\components\DeckList.vue
+D:\ArkhamHorror\frontend\src\arkham\components\DeckRow.vue
+D:\ArkhamHorror\frontend\src\arkham\components\EncounterDeck.vue
+D:\ArkhamHorror\frontend\src\arkham\components\NewDeck.vue
+D:\ArkhamHorror\frontend\src\arkham\components\ScenarioDeck.vue
+D:\ArkhamHorror\frontend\src\arkham\components\UpgradeDeck.vue
+D:\ArkhamHorror\frontend\src\arkham\types\Deck.ts
+D:\ArkhamHorror\frontend\src\arkham\views\Deck.vue
+D:\ArkhamHorror\frontend\src\arkham\views\Decks.vue
+Copilot said: 找到了！请运行： ```powershell Get-Content "D:\ArkhamHorror\frontend\src\arkham\components\NewDeck.vue" ``` 把结果贴给我。
+找到了！请运行：
+
+PowerShell
+Get-Content "D:\ArkhamHorror\frontend\src\arkham\components\NewDeck.vue"
+把结果贴给我。
+
+You said: <script lang="ts" setup> import { computed, watch, ref
+<script lang="ts" setup>
+import { computed, watch, ref } from 'vue'
+import { storeToRefs } from 'pinia'
+import {imgsrc} from '@/arkham/helpers';
+import { fetchInvestigators, newDeck, validateDeck } from '@/arkham/api'
+import ArkhamDbDeck from '@/arkham/components/ArkhamDbDeck.vue';
+import { ArkhamDbDecklist } from '@/arkham/types/Deck';
+import { useCardStore } from '@/stores/cards'
+
+const props = withDefaults(defineProps<{
+  noPortrait?: boolean
+  setPortrait?: (src: string) => void
+}>(), { noPortrait: false })
+
+const emit = defineEmits(['newDeck'])
+
+const store = useCardStore()
+const investigators = ref<string[]>([])
+const { cards }  = storeToRefs(store)
+
+investigators.value = await fetchInvestigators()
+
+interface UnimplementedCardError {
+  tag: string
+  contents: string
+}
+
+interface ArkhamDBCard {
+  name: string
+  code: string
+  xp?: string
+}
+
+const errors = ref<string[]>([])
+const valid = ref(false)
+const investigatorError = ref<string | null>(null)
+const investigator = ref<string | null>(null)
+const deck = ref<string | null>(null)
+const deckId = ref<string | null>(null)
+const deckName = ref<string | null>(null)
+const deckUrl = ref<string | null>(null)
+const deckList = ref<ArkhamDbDecklist | null>(null)
+const maybeSetPortrait = (code: string | null | undefined) => {
+  if (!code || !props.setPortrait) return
+  props.setPortrait(imgsrc(`portraits/${normalizeCode(code)}.jpg`))
+}
+const resolvedInvestigatorCode = (d: ArkhamDbDecklist) =>
+  d.meta?.alternate_front ?? d.investigator_code
+
+function loadDeckFromFile(e: Event) {
+  valid.value = false
+  const files = (e.target as HTMLInputElement).files || (e as DragEvent).dataTransfer?.files || [];
+  const deck = files[0]
+  if (deck) {
+    const reader = new FileReader()
+    reader.onloadend = (e1: ProgressEvent<FileReader>) => {
+      if(!e1?.target?.result) return
+      let data = JSON.parse(e1.target.result.toString())
+      deckList.value = data
+      investigator.value = null
+      investigatorError.value = null
+      if (investigators.value.includes(data.investigator_code)) {
+        if(data.meta && data.meta.alternate_front) {
+          investigator.value = data.meta.alternate_front
+          if (props.setPortrait) {
+            props.setPortrait(imgsrc(`portraits/${data.meta.alternate_front.replace('c', '')}.jpg`))
+          }
+        } else {
+          investigator.value = data.investigator_code
+          if (props.setPortrait) {
+            props.setPortrait(imgsrc(`portraits/${data.investigator_code.replace('c', '')}.jpg`))
+          }
+        }
+
+      } else {
+        investigatorError.value = `${data.investigator_name} is not yet implemented, please use a different deck ${data}`
+      }
+      deckId.value = data.id.toString()
+      deckName.value = data.name
+
+      runValidations()
+    }
+    reader.readAsText(deck)
+  }
+}
+
+watch(deckList, loadDeck)
+
+async function loadDeck() {
+  valid.value = false
+  errors.value = []
+  investigator.value = null
+  investigatorError.value = null
+
+  const dl = deckList.value
+  if (!dl) return
+
+  const invCode = resolvedInvestigatorCode(dl)
+  const invImplemented = investigators.value.includes(dl.investigator_code)
+
+  if (invImplemented) {
+    investigator.value = invCode
+    maybeSetPortrait(invCode)
+  } else {
+    investigatorError.value =
+      `${dl.investigator_name} is not yet implemented, please use a different deck ${JSON.stringify(dl)}`
+  }
+
+  deckId.value = String(dl.id)
+  deckName.value = dl.name
+  deckUrl.value = dl.url
+
+  await runValidations()
+}
+
+const normalizeCode = (code: string) => code.replace(/^c/, '')
+const cardByCode = computed(() => {
+  const m = new Map<string, ArkhamDBCard>()
+  for (const c of cards.value) m.set(normalizeCode(c.code), c)
+  return m
+})
+
+async function runValidations() {
+  valid.value = false
+  errors.value = []
+  try {
+    await validateDeck(deckList.value)
+    valid.value = true
+  } catch (err: any) {
+    const payload: UnimplementedCardError[] = err?.response?.data ?? []
+    errors.value = payload.map((e) => {
+      const key = normalizeCode(e.contents)
+      const hit = cardByCode.value.get(key)
+      if (hit) return hit.xp ? `${hit.name} (${hit.xp})` : hit.name
+      return `Unknown card: ${e.contents}`
+    })
+  }
+}
+
+async function createDeck() {
+  errors.value = []
+  if (!(deckId.value && deckName.value && valid.value)) return
+
+  try {
+    const created = await newDeck(deckId.value, deckName.value, deckUrl.value, deckList.value)
+    deckId.value = null
+    deckName.value = null
+    deckUrl.value = null
+    investigator.value = null
+    deck.value = null
+    emit('newDeck', created)
+  } catch (err: any) {
+    const payload: UnimplementedCardError[] = err?.response?.data ?? []
+    errors.value = payload.map((e) => {
+      const key = normalizeCode(e.contents)
+      const hit = cardByCode.value.get(key)
+      if (hit) return hit.xp ? `${hit.name} (${hit.xp})` : hit.name
+      return 'Unknown card'
+    })
+  }
+}
+</script>
+
+<template>
+  <div class="new-deck">
+    <div class="form-body">
+      <img v-if="investigator && !noPortrait" class="portrait" :src="imgsrc(`portraits/${investigator.replace('c', '')}.jpg`)" />
+      <div class="fields">
+        <ArkhamDbDeck v-model="deckList" />
+        <input type="file" accept=".json,application/json" @change="loadDeckFromFile" />
+        <input v-if="investigator" v-model="deckName" />
+        <button :disabled="!valid" @click.prevent="createDeck">Create</button>
+      </div>
+    </div>
+    <div class="errors" v-if="investigatorError">
+      {{investigatorError}}
+    </div>
+    <div class="errors" v-if="errors.length > 0">
+      <p>Could not create deck, the following cards are unimplemented:</p>
+      <ul>
+        <li class="error" v-for="(error, idx) in errors" :key="idx">
+          {{error}}
+        </li>
+      </ul>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.new-deck {
+  :deep(input) {
+    outline: 0;
+    border: 1px solid var(--background);
+    padding: 15px;
+    color: #F2F2F2;
+    background: var(--background-dark);
+    width: 100%;
+    margin-bottom: 10px;
+  }
+  .portrait {
+    margin-right: 10px;
+    height: 170px;
+  }
+  .fields {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    flex-flow: wrap;
+  }
+  .errors {
+    background-color: #660000;
+    width: 100%;
+    margin-top: 10px;
+    padding: 15px;
+  }
+  button {
+    outline: 0;
+    padding: 15px;
+    background: #6E8640;
+    text-transform: uppercase;
+    color: white;
+    border: 0;
+    width: 100%;
+    &:hover {
+      background: hsl(80, 35%, 32%);
+    }
+  }
+  button[disabled] {
+    background: #999;
+    cursor: not-allowed;
+    &:hover {
+      background: #999;
+    }
+  }
+  display: flex;
+  flex-direction: column;
+  color: #FFF;
+  border-radius: 3px;
+  a {
+    color: #365488;
+    font-weight: bolder;
+  }
+}
+
+.form-body {
+  display: flex;
+}
+</style>
+Copilot said: 好的，关键在 `ArkhamDbDeck.vue` 组件里，那个是处理链接粘贴的。请运行： ```powershell Get-Content "D:\ArkhamHorror\frontend\src\arkham\components\ArkhamDbDeck.vue" ``` 把结果贴给我。
+好的，关键在 ArkhamDbDeck.vue 组件里，那个是处理链接粘贴的。请运行：
+
+PowerShell
+Get-Content "D:\ArkhamHorror\frontend\src\arkham\components\ArkhamDbDeck.vue"
+把结果贴给我。
+
+You said: <script lang="ts" setup> import { ref, computed }
+<script lang="ts" setup>
+import { ref, computed } from 'vue'
+import {imgsrc, localizeArkhamDBBaseUrl} from '@/arkham/helpers';
+
+const model = defineModel()
+const deck = ref<string | null>(null)
+const deckUrl = ref<string | null>(null)
+const error = ref<string | null>(null)
+
+const arkhamDbRegex = /https:\/\/(?:[a-zA-Z0-9-]+\.)?arkhamdb\.com\/(deck(list)?)(\/view)?\/([^/]+)/
+const arkhamBuildRegex = /https:\/\/(?:arkham\.build|(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?)\/(deck(list)?|share)(\/view)?\/([^/]+)/
+const isArkhamBuild = computed(() => deck.value && deck.value.match(arkhamBuildRegex))
+
+async function loadDeck() {
+  if (!deck.value) return
+  model.value = null
+  error.value = null
+
+  let matches
+  if (matches = deck.value.match(arkhamDbRegex)) {
+    deckUrl.value = `${localizeArkhamDBBaseUrl()}/api/public/${matches[1]}/${matches[4]}`
+    const response = await fetch(deckUrl.value)
+    const data = await response.json()
+    model.value = {...data, url: deckUrl.value}
+  } else if (matches = deck.value.match(arkhamBuildRegex)) {
+    deckUrl.value = `${import.meta.env.VITE_ARKHAM_BUILD_API_URL}/v1/public/share/${matches[4]}`
+    const response = await fetch(deckUrl.value)
+    if (response.ok) {
+      const data = await response.json()
+      const meta = data.meta ? JSON.parse(data.meta) : {}
+      const override = meta.hidden_slots ? meta.hidden_slots : {}
+      const cleanOverride = Object.fromEntries(Object.entries(override).filter(([_, value]) => value && (typeof value === 'object' ? Object.keys(value).length > 0 : true)))
+      const deckData = {...data, ...cleanOverride, url: deckUrl.value}
+      if (Object.keys(deckData.slots).length === 0) {
+        error.value = "Is this deck empty?"
+      } else{
+        model.value = deckData
+      }
+    } else {
+      error.value = "Could not find deck, please make sure you have created a public share."
+    }
+  }
+}
+
+function pasteDeck(evt: ClipboardEvent) {
+  error.value = null
+  if (evt.clipboardData) {
+    deck.value = evt.clipboardData.getData('text')
+    loadDeck()
+  }
+}
+</script>
+
+<template>
+  <input
+    type="url"
+    v-model="deck"
+    @change="loadDeck"
+    @paste.prevent="pasteDeck($event)"
+    v-bind:placeholder="$t('create.deckUrlPlaceholder')"
+  />
+  <div class="error" v-if="error && isArkhamBuild">
+    <p>{{ error }}</p>
+     <img :src="imgsrc('ui/arkham-build-public-share.jpg')" />
+  </div>
+</template>
+
+<style scoped>
+input {
+  outline: 0;
+  border: 1px solid #000;
+  padding: 15px;
+  background: #F2F2F2;
+  width: 100%;
+  margin-bottom: 10px;
+}
+
+.error {
+  background-color: var(--survivor-extra-dark);
+  width: 100%;
+  margin-bottom: 10px;
+  padding: 10px;
+  border-radius: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-transform: uppercase;
+  img {
+    flex: 0;
+    max-width: fit-content;
+    border-radius: 5px;
+  }
+}
+</style>
+Copilot said: 现在我看清楚了！看这两个正则： - **arkhamDbRegex**: 匹配 `https://xxx.arkhamdb.com/...` - **arkhamBuildRegex**: 匹配 `https://arkham.build/...`
+现在我看清楚了！看这两个正则：
+
+arkhamDbRegex: 匹配 https://xxx.arkhamdb.com/...
+arkhamBuildRegex: 匹配 https://arkham.build/... 或 https://IP地址:端口/...
+问题在于：两个正则都要求 https://，而且 arkhamBuildRegex 里的 IP 匹配和 arkham.build 公网域名都在同一个正则里。
+
+它们已经能同时工作了！ 让我确认一下关键环节。请运行：
+
+PowerShell
+Get-Content "D:\ArkhamHorror\frontend\src\arkham\helpers.ts"
+把结果贴给我。
+
+You said: import ita from '@/digests/ita.json' import es from '@/digests/es.json' import
+import ita from '@/digests/ita.json'
+import es from '@/digests/es.json'
+import fr from '@/digests/fr.json'
+import ko from '@/digests/ko.json'
+import zh from '@/digests/zh.json'
+
+import { useSiteSettingsStore } from '@/stores/site_settings'
+import { ref, type Ref } from 'vue';
+
+interface ImageHelper {
+  root: string
+  digests: Set<string>
+  data: Map<string, Ref<boolean>>
+  loaded: Ref<boolean>
+}
+
+const batchSize: number = 1000
+const defaultHelper: ImageHelper = { root: '', digests: new Set(), data: new Map(), loaded: ref(true) }
+const imgHelper:Map<string, ImageHelper> = new Map<string, ImageHelper>([
+  ['it', { root: 'ita', digests: new Set(ita), data: new Map(), loaded: ref(false) }],
+  ['fr', { root: 'fr', digests: new Set(fr), data: new Map(), loaded: ref(false) }],
+  ['es', { root: 'es', digests: new Set(es), data: new Map(), loaded: ref(false) }],
+  ['ko', { root: 'ko', digests: new Set(ko), data: new Map(), loaded: ref(false) }],
+  ['zh', { root: 'zh', digests: new Set(zh), data: new Map(), loaded: ref(false) }]
+])
+
+export async function checkImageExists(language: string = localStorage.getItem('language') || 'en') {
+  if (language === 'en' || !imgHelper.has(language)) return
+
+  const helper = imgHelper.get(language) || defaultHelper
+  if (!helper.root || helper.loaded.value) return
+
+  const store = useSiteSettingsStore()
+
+  helper.digests.forEach((originPath) => {
+    const path = originPath.replace(/^\//, '')
+    const ext = (path.split('.').pop() || '').toLowerCase()
+
+    if (ext !== 'avif' && ext !== 'webp' && !ext.endsWith('png') && !ext.startsWith('jpg')) return
+
+    helper.data.set(path, ref(true))
+  })
+
+  helper.loaded.value = true
+}
+
+export function toCapitalizedWords(name: string) {
+  const words = name.match(/[A-Z]?[a-z']+|[A-Z]/g) || [];
+  return capitalize(words.map(lowercase).join(" "));
+}
+
+export function toCamelCase(str : string) {
+  return str
+    .toLowerCase()
+    .replace(/\s+(\w)/g, (_, letter) => letter.toUpperCase())
+    .replace(/\s+/g, '');
+}
+
+export function capitalize(word: string) {
+  return word.charAt(0).toUpperCase() + word.substring(1);
+}
+
+export function lowercase(word: string) {
+  return word.charAt(0).toLowerCase() + word.substring(1);
+}
+
+export const baseUrl = import.meta.env.PROD ? "https://assets.arkhamhorror.app" : ''
+
+export function isLocalized(src: string) {
+  const language = localStorage.getItem('language') || 'en'
+  // Always return true for English since all base images are English
+  if (language === 'en') return true
+
+  const helper = imgHelper.get(language) || defaultHelper
+  const path = src.replace(/^\//, '')
+  const exists = helper.digests.has(path)
+
+  if (exists && helper.root && helper.loaded.value) {
+    const canFetch = helper.data.get(path)?.value || false
+    if (canFetch) return true
+  }
+
+  return false
+}
+
+export function imgsrc(src: string) {
+  const store = useSiteSettingsStore()
+  const language = localStorage.getItem('language') || 'en'
+  const path = src.replace(/^\//, '')
+  const fullPath = `${store.assetHost}/img/arkham/${path}`
+
+  if (isLocalized(src)) {
+    const helper = imgHelper.get(language) || defaultHelper
+    const exists = helper.digests.has(path)
+
+    if (exists && helper.root && helper.loaded.value) {
+      const i18nFullPath = `${store.assetHost}/img/arkham/${helper.root}/${path}`
+      const canFetch = helper.data.get(path)?.value || false
+
+      if (canFetch) return i18nFullPath
+    }
+  }
+
+  return fullPath
+}
+
+export function pluralize(w: string, n: number) {
+  const language = localStorage.getItem('language') || 'en'
+  switch (language) {
+    case 'ko': {
+      return `${w} ${n}`
+    }
+    case 'zh': {
+      return `${n}${w}${n == 1 ? '' : ''}`
+    }
+    default: return `${n} ${w}${n == 1 ? '' : 's'}`
+  }
+}
+
+export function formatContent(body:string) {
+  return replaceIcons(body).
+    replace(/_([^_]*)_/g, '<strong>$1</strong>').
+    replace(/\*([^\*]*)\*/g, '<i>$1</i>')
+}
+
+export function replaceIcons(body: string) {
+  return body.
+    replace(/{action}/g, '<span class="action-icon"></span>').
+    replace(/{fast}/g, '<span class="fast-icon"></span>').
+    replace(/{reaction}/g, '<span class="reaction-icon"></span>').
+    replace(/{willpower}/g, '<span class="willpower-icon"></span>').
+    replace(/{intellect}/g, '<span class="intellect-icon"></span>').
+    replace(/{combat}/g, '<span class="combat-icon"></span>').
+    replace(/{agility}/g, '<span class="agility-icon"></span>').
+    replace(/{wild}/g, '<span class="wild-icon"></span>').
+    replace(/{guardian}/g, '<span class="guardian-icon"></span>').
+    replace(/{seeker}/g, '<span class="seeker-icon"></span>').
+    replace(/{rogue}/g, '<span class="rogue-icon"></span>').
+    replace(/{mystic}/g, '<span class="mystic-icon"></span>').
+    replace(/{survivor}/g, '<span class="survivor-icon"></span>').
+    replace(/{elderSign}/g, '<span class="elder-sign"></span>').
+    replace(/{autoFail}/g, '<span class="auto-fail"></span>').
+    replace(/{skull}/g, '<span class="skull-icon"></span>').
+    replace(/{cultist}/g, '<span class="cultist-icon"></span>').
+    replace(/{tablet}/g, '<span class="tablet-icon"></span>').
+    replace(/{elderThing}/g, '<span class="elder-thing-icon"></span>').
+    replace(/{bless}/g, '<span class="bless-icon"></span>').
+    replace(/{curse}/g, '<span class="curse-icon"></span>').
+    replace(/{frost}/g, '<span class="frost-icon"></span>').
+    replace(/{sealA}/g, '<span class="seal-a-icon"></span>').
+    replace(/{sealB}/g, '<span class="seal-b-icon"></span>').
+    replace(/{sealC}/g, '<span class="seal-c-icon"></span>').
+    replace(/{sealD}/g, '<span class="seal-d-icon"></span>').
+    replace(/{sealE}/g, '<span class="seal-e-icon"></span>').
+    replace(/{codex}/g, '<span class="codex-icon"></span>').
+    replace(/{day}/g, '<span class="day-icon"></span>').
+    replace(/{night}/g, '<span class="night-icon"></span>').
+    replace(/{perPlayer}/g, '<span class="per-player"></span>')
+}
+
+type InvestigatorClass =
+  | "guardian"
+  | "seeker"
+  | "rogue"
+  | "mystic"
+  | "survivor"
+  | "neutral"
+
+type CssClassFlags = Partial<Record<InvestigatorClass, true>>
+
+const CLASS_TO_CODES: Record<InvestigatorClass, Set<string>> = {
+  guardian: new Set([
+    "01001", "01501", "02001", "03001", "04001", "05001", "06001", "07001",
+    "08001", "09001", "10001", "11001", "60101", "90024", "90059", "98004",
+    "98010",
+  ]),
+  seeker: new Set([
+    "01002", "01502", "02002", "03002", "04002", "05002", "06002", "07002",
+    "08004", "09004", "10004", "11004", "11007", "60201", "90001", "90078",
+    "98007",
+  ]),
+  rogue: new Set([
+    "01003", "01503", "02003", "03003", "04003", "05003", "06003", "07003",
+    "08007", "09008", "10009", "11011", "60301", "90008", "90062", "90084",
+    "98001",
+  ]),
+  mystic: new Set([
+    "01004", "01504", "02004", "03004", "04004", "05004", "05006", "06004",
+    "07004", "08010", "09011", "10012", "11008", "11014", "60401", "90017",
+    "90049", "98016", "98019", "99001",
+  ]),
+  survivor: new Set([
+    "01005", "01505", "02005", "03005", "04005", "05005", "06005", "07005",
+    "08016", "09015", "10015", "11017", "60501", "90037", "90046", "98013",
+  ]),
+  neutral: new Set([
+    "03006", "04244", "05046", "05047", "05048", "05049", "09018", "89001",
+  ]),
+}
+
+export function investigatorClass(code: string): CssClassFlags {
+  const flags: CssClassFlags = {}
+  for (const cls of Object.keys(CLASS_TO_CODES) as InvestigatorClass[]) {
+    if (CLASS_TO_CODES[cls].has(code)) {
+      flags[cls] = true
+    }
+  }
+  return flags
+}
+
+export function waitForImagesToLoad(callback: () => void) {
+  const images = document.querySelectorAll('img')
+  const totalImages = images.length
+  let loadedCount = 0
+
+  if (totalImages === 0) {
+    callback()
+    return
+  }
+
+  const checkIfAllLoaded = () => {
+    loadedCount++
+    if (loadedCount === totalImages) {
+      callback()
+    }
+  };
+
+  images.forEach(image => {
+    if (image.complete) {
+      checkIfAllLoaded()
+    } else {
+      image.addEventListener('load', checkIfAllLoaded)
+      image.addEventListener('error', checkIfAllLoaded)
+    }
+  });
+}
+
+export function groupBy<T, K extends string | number | symbol>(
+  array: T[],
+  getKey: (item: T) => K
+): Record<K, T[]> {
+  return array.reduce((result, item) => {
+    const key = getKey(item);
+    if (!result[key]) {
+      result[key] = [];
+    }
+    result[key].push(item);
+    return result;
+  }, {} as Record<K, T[]>);
+}
+
+export function localizeArkhamDBBaseUrl() {
+  const language = localStorage.getItem('language') || 'en'
+
+  const baseUrl = new URL('https://arkhamdb.com');
+  if (language === "en") return baseUrl.origin;
+  if (!['de', 'es', 'fr', 'it', 'ko', 'pl', 'po', 'ru', 'uk', 'zh'].includes(language))
+    return baseUrl.origin;
+
+  baseUrl.hostname = `${language}.${baseUrl.hostname}`;
+  return baseUrl.origin;
+}
+Copilot said: 现在我完全看清楚了。代码逻辑其实已经支持三种来源： 1. **公网 arkhamdb.com** → 直接用 `arkhamDbRegex` 匹配，然后调用
+现在我完全看清楚了。代码逻辑其实已经支持三种来源：
+
+公网 arkhamdb.com → 直接用 arkhamDbRegex 匹配，然后调用 arkhamdb.com/api/public/...
+公网 arkham.build → 用 arkhamBuildRegex 匹配，然后调用 VITE_ARKHAM_BUILD_API_URL 获取数据
+本地 arkham.build → 也用 arkhamBuildRegex 匹配（IP地址格式），也调用 VITE_ARKHAM_BUILD_API_URL
+问题在这里： 第2和第3种都用同一个 VITE_ARKHAM_BUILD_API_URL，现在你设置的是本地地址 https://192.168.43.178:3445。所以：
+
+粘贴本地链接 → 调用本地 API ✅
+粘贴公网 arkham.build 链接 → 也调用本地 API ❌（应该调用公网）
+粘贴公网 arkhamdb.com 链接 → 直接调用公网 arkhamdb.com ✅（这个本来就能用）
+解决方案： 修改 ArkhamDbDeck.vue，让它根据粘贴的链接自动判断用公网 API 还是本地 API。
+
+请运行以下命令：
+
+PowerShell
+@'
+<script lang="ts" setup>
+import { ref, computed } from 'vue'
+import {imgsrc, localizeArkhamDBBaseUrl} from '@/arkham/helpers';
+
+const model = defineModel()
+const deck = ref<string | null>(null)
+const deckUrl = ref<string | null>(null)
+const error = ref<string | null>(null)
+
+const arkhamDbRegex = /https:\/\/(?:[a-zA-Z0-9-]+\.)?arkhamdb\.com\/(deck(list)?)(\/view)?\/([^/]+)/
+const arkhamBuildRegex = /https:\/\/(?:arkham\.build|(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?)\/(deck(list)?|share)(\/view)?\/([^/]+)/
+const arkhamBuildPublicRegex = /https:\/\/arkham\.build\//
+const isArkhamBuild = computed(() => deck.value && deck.value.match(arkhamBuildRegex))
+
+function getArkhamBuildApiUrl(url: string): string {
+  if (arkhamBuildPublicRegex.test(url)) {
+    return 'https://arkham.build'
+  }
+  return import.meta.env.VITE_ARKHAM_BUILD_API_URL
+}
+
+async function loadDeck() {
+  if (!deck.value) return
+  model.value = null
+  error.value = null
+
+  let matches
+  if (matches = deck.value.match(arkhamDbRegex)) {
+    deckUrl.value = `${localizeArkhamDBBaseUrl()}/api/public/${matches[1]}/${matches[4]}`
+    const response = await fetch(deckUrl.value)
+    const data = await response.json()
+    model.value = {...data, url: deckUrl.value}
+  } else if (matches = deck.value.match(arkhamBuildRegex)) {
+    const apiBase = getArkhamBuildApiUrl(deck.value)
+    deckUrl.value = `${apiBase}/v1/public/share/${matches[4]}`
+    const response = await fetch(deckUrl.value)
+    if (response.ok) {
+      const data = await response.json()
+      const meta = data.meta ? JSON.parse(data.meta) : {}
+      const override = meta.hidden_slots ? meta.hidden_slots : {}
+      const cleanOverride = Object.fromEntries(Object.entries(override).filter(([_, value]) => value && (typeof value === 'object' ? Object.keys(value).length > 0 : true)))
+      const deckData = {...data, ...cleanOverride, url: deckUrl.value}
+      if (Object.keys(deckData.slots).length === 0) {
+        error.value = "Is this deck empty?"
+      } else{
+        model.value = deckData
+      }
+    } else {
+      error.value = "Could not find deck, please make sure you have created a public share."
+    }
+  }
+}
+
+function pasteDeck(evt: ClipboardEvent) {
+  error.value = null
+  if (evt.clipboardData) {
+    deck.value = evt.clipboardData.getData('text')
+    loadDeck()
+  }
+}
+</script>
+
+<template>
+  <input
+    type="url"
+    v-model="deck"
+    @change="loadDeck"
+    @paste.prevent="pasteDeck($event)"
+    v-bind:placeholder="$t('create.deckUrlPlaceholder')"
+  />
+  <div class="error" v-if="error && isArkhamBuild">
+    <p>{{ error }}</p>
+     <img :src="imgsrc('ui/arkham-build-public-share.jpg')" />
+  </div>
+</template>
+
+<style scoped>
+input {
+  outline: 0;
+  border: 1px solid #000;
+  padding: 15px;
+  background: #F2F2F2;
+  width: 100%;
+  margin-bottom: 10px;
+}
+
+.error {
+  background-color: var(--survivor-extra-dark);
+  width: 100%;
+  margin-bottom: 10px;
+  padding: 10px;
+  border-radius: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-transform: uppercase;
+  img {
+    flex: 0;
+    max-width: fit-content;
+    border-radius: 5px;
+  }
+}
+</style>
+'@ | Set-Content "D:\ArkhamHorror\frontend\src\arkham\components\ArkhamDbDeck.vue" -Encoding UTF8
+运行完告诉我结果。
+
+You said: 运行完了
+运行完了
+Copilot said: 好的！因为你现在用的是 Vite dev server（开发模式），修改会自动热更新。 **现在请在浏览器测试三种链接：** 1. **本地 arkham.build 链接**
+好的！因为你现在用的是 Vite dev server（开发模式），修改会自动热更新。
+
+现在请在浏览器测试三种链接：
+
+本地 arkham.build 链接 → 粘贴 https://192.168.43.178:3445/share/gCipgbAGn0xic8F
+公网 arkham.build 链接 → 粘贴一个公网的分享链接，比如去 https://arkham.build 上随便找一个 share 链接
+公网 arkhamdb.com 链接 → 粘贴一个 arkhamdb 的牌组链接，比如 https://arkhamdb.com/decklist/view/1
+每个测试完告诉我结果！
+
+You said: 本地 arkham.build 链接 和公网 arkhamdb.com 链接都可以唯独公网 arkham.build
+本地 arkham.build 链接 和公网 arkhamdb.com 链接都可以唯独公网 arkham.build 链接不行
+Copilot said: 公网 arkham.build 可能有跨域（CORS）限制，不允许从你的本地地址直接请求它的 API。 让我看看能不能通过 Vite 代理来解决。请运行： ```powershell Get-Content "D:\ArkhamHorror\frontend\vite.config.js" ``` 把结果贴给我。
+公网 arkham.build 可能有跨域（CORS）限制，不允许从你的本地地址直接请求它的 API。
+
+让我看看能不能通过 Vite 代理来解决。请运行：
+
+PowerShell
+Get-Content "D:\ArkhamHorror\frontend\vite.config.js"
+把结果贴给我。
+
+You said: import { fileURLToPath, URL } from 'node:url' import
+import { fileURLToPath, URL } from 'node:url'
+
+import { defineConfig } from 'vite'
+import vue from '@vitejs/plugin-vue'
+
+// https://vitejs.dev/config/
+export default defineConfig({
+  plugins: [
+    vue(),
+  ],
+  resolve: {
+    alias: {
+      '@': fileURLToPath(new URL('./src', import.meta.url))
+    }
+  },
+  server: {
+    port: 8080, host: "0.0.0.0",
+    proxy: {
+      "^/api": {
+        target: "http://127.0.0.1:3000",
+        changeOrigin: true,
+        secure: false,
+        ws: true
+      },
+      "^/health": {
+        target: "http://127.0.0.1:3000",
+        changeOrigin: true,
+        secure: false,
+        ws: false
+      }
+    }
+  }
+})
+Copilot said: 明白了！解决方案是：通过 Vite 代理来转发公网 arkham.build 的请求，绕过 CORS 限制。 **第一步：更新
+明白了！解决方案是：通过 Vite 代理来转发公网 arkham.build 的请求，绕过 CORS 限制。
+
+第一步：更新 vite.config.js，添加代理：
+
+PowerShell
+@'
+import { fileURLToPath, URL } from 'node:url'
+
+import { defineConfig } from 'vite'
+import vue from '@vitejs/plugin-vue'
+
+// https://vitejs.dev/config/
+export default defineConfig({
+  plugins: [
+    vue(),
+  ],
+  resolve: {
+    alias: {
+      '@': fileURLToPath(new URL('./src', import.meta.url))
+    }
+  },
+  server: {
+    port: 8080, host: "0.0.0.0",
+    proxy: {
+      "^/api": {
+        target: "http://127.0.0.1:3000",
+        changeOrigin: true,
+        secure: false,
+        ws: true
+      },
+      "^/health": {
+        target: "http://127.0.0.1:3000",
+        changeOrigin: true,
+        secure: false,
+        ws: false
+      },
+      "^/arkham-build-proxy": {
+        target: "https://arkham.build",
+        changeOrigin: true,
+        secure: true,
+        rewrite: (path) => path.replace(/^\/arkham-build-proxy/, '')
+      }
+    }
+  }
+})
+'@ | Set-Content "D:\ArkhamHorror\frontend\vite.config.js" -Encoding UTF8
+第二步：更新 ArkhamDbDeck.vue，让公网链接走代理：
+
+PowerShell
+@'
+<script lang="ts" setup>
+import { ref, computed } from 'vue'
+import {imgsrc, localizeArkhamDBBaseUrl} from '@/arkham/helpers';
+
+const model = defineModel()
+const deck = ref<string | null>(null)
+const deckUrl = ref<string | null>(null)
+const error = ref<string | null>(null)
+
+const arkhamDbRegex = /https:\/\/(?:[a-zA-Z0-9-]+\.)?arkhamdb\.com\/(deck(list)?)(\/view)?\/([^/]+)/
+const arkhamBuildRegex = /https:\/\/(?:arkham\.build|(?:\d{1,3}\.){3}\d{1,3}(?::\d+)?)\/(deck(list)?|share)(\/view)?\/([^/]+)/
+const arkhamBuildPublicRegex = /https:\/\/arkham\.build\//
+const isArkhamBuild = computed(() => deck.value && deck.value.match(arkhamBuildRegex))
+
+function getArkhamBuildApiUrl(url: string): string {
+  if (arkhamBuildPublicRegex.test(url)) {
+    return '/arkham-build-proxy'
+  }
+  return import.meta.env.VITE_ARKHAM_BUILD_API_URL
+}
+
+async function loadDeck() {
+  if (!deck.value) return
+  model.value = null
+  error.value = null
+
+  let matches
+  if (matches = deck.value.match(arkhamDbRegex)) {
+    deckUrl.value = `${localizeArkhamDBBaseUrl()}/api/public/${matches[1]}/${matches[4]}`
+    const response = await fetch(deckUrl.value)
+    const data = await response.json()
+    model.value = {...data, url: deckUrl.value}
+  } else if (matches = deck.value.match(arkhamBuildRegex)) {
+    const apiBase = getArkhamBuildApiUrl(deck.value)
+    deckUrl.value = `${apiBase}/v1/public/share/${matches[4]}`
+    const response = await fetch(deckUrl.value)
+    if (response.ok) {
+      const data = await response.json()
+      const meta = data.meta ? JSON.parse(data.meta) : {}
+      const override = meta.hidden_slots ? meta.hidden_slots : {}
+      const cleanOverride = Object.fromEntries(Object.entries(override).filter(([_, value]) => value && (typeof value === 'object' ? Object.keys(value).length > 0 : true)))
+      const deckData = {...data, ...cleanOverride, url: deckUrl.value}
+      if (Object.keys(deckData.slots).length === 0) {
+        error.value = "Is this deck empty?"
+      } else{
+        model.value = deckData
+      }
+    } else {
+      error.value = "Could not find deck, please make sure you have created a public share."
+    }
+  }
+}
+
+function pasteDeck(evt: ClipboardEvent) {
+  error.value = null
+  if (evt.clipboardData) {
+    deck.value = evt.clipboardData.getData('text')
+    loadDeck()
+  }
+}
+</script>
+
+<template>
+  <input
+    type="url"
+    v-model="deck"
+    @change="loadDeck"
+    @paste.prevent="pasteDeck($event)"
+    v-bind:placeholder="$t('create.deckUrlPlaceholder')"
+  />
+  <div class="error" v-if="error && isArkhamBuild">
+    <p>{{ error }}</p>
+     <img :src="imgsrc('ui/arkham-build-public-share.jpg')" />
+  </div>
+</template>
+
+<style scoped>
+input {
+  outline: 0;
+  border: 1px solid #000;
+  padding: 15px;
+  background: #F2F2F2;
+  width: 100%;
+  margin-bottom: 10px;
+}
+
+.error {
+  background-color: var(--survivor-extra-dark);
+  width: 100%;
+  margin-bottom: 10px;
+  padding: 10px;
+  border-radius: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-transform: uppercase;
+  img {
+    flex: 0;
+    max-width: fit-content;
+    border-radius: 5px;
+  }
+}
+</style>
+'@ | Set-Content "D:\ArkhamHorror\frontend\src\arkham\components\ArkhamDbDeck.vue" -Encoding UTF8
+两条都运行完后，重启 Vite dev server：
+
+PowerShell
+taskkill /IM node.exe /F
+Start-Sleep -Seconds 2
+Start-Process "node" -ArgumentList "D:\ArkhamHorror\https-proxy.js" -WindowStyle Minimized
+Start-Process "node" -ArgumentList "D:\ArkhamHorror\voice-server.js" -WindowStyle Minimized
+Start-Process "node" -ArgumentList "D:\arkham-deckbuilder\local-share-api.cjs" -WindowStyle Minimized
+Start-Process powershell -ArgumentList "-Command cd D:\ArkhamHorror\frontend; npx vite dev" -WindowStyle Minimized
+然后再试试粘贴公网 arkham.build 的分享链接，告诉我结果！
+
+You said: 公网 arkham.build 的分享链接还是不行
+公网 arkham.build 的分享链接还是不行
