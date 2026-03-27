@@ -1,0 +1,2230 @@
+Copilot Chat
+Creating a distributable one-click package
+tensorflow/tensorflow
+new1.txt
+README.md
+You said: @dylansils/my-files/files/new1.txt 这是我们之前的聊天记录，我想知道如果我把我的这个超级私货版本的arkhamhorror安装包和arkham.build安装包发给我的朋友我的朋友怎么安装，他们如果安装的盘符和我不一样会不会产生严重后果导致安装失败，还有我想给离线图包从这些文件中剔除出来让他们运行D:\ArkhamHorror\README.md里教学的自动下载各种语言离线图包的指令的教程以缩小安装程序的大小，还有如果我自己误删除了我的游戏容器该怎么办，你教我的教程里是这么写的================================================================ ArkhamHorror 本地服务器 使用教程
+@dylansils/my-files/files/new1.txt 这是我们之前的聊天记录，我想知道如果我把我的这个超级私货版本的arkhamhorror安装包和arkham.build安装包发给我的朋友我的朋友怎么安装，他们如果安装的盘符和我不一样会不会产生严重后果导致安装失败，还有我想给离线图包从这些文件中剔除出来让他们运行D:\ArkhamHorror\README.md里教学的自动下载各种语言离线图包的指令的教程以缩小安装程序的大小，还有如果我自己误删除了我的游戏容器该怎么办，你教我的教程里是这么写的================================================================
+  ArkhamHorror 本地服务器 使用教程
+  生成日期: 2026-03-27
+================================================================
+
+【一、项目简介】
+
+  你搭建了一个本地局域网版的 ArkhamHorror 游戏服务器，包含以下功能：
+  - ArkhamHorror 卡牌游戏主程序
+  - Arkham.build 组牌器（本地版）
+  - 背景音乐播放（实时读取 music 文件夹）
+  - 多人语音聊天（支持切换输入/输出设备）
+  - 网页小聊天室
+
+  局域网内的其他设备（手机、平板、电脑）都可以通过浏览器访问。
+
+
+【二、文件结构】
+
+  D:\ArkhamHorror\                  ← 主目录
+  ├── start-all.ps1                 ← 一键启动脚本
+  ├── update-ip.ps1                 ← IP 变更时用的脚本
+  ├── https-proxy.js                ← HTTPS 代理（端口 3443 + 3445）
+  ├── voice-server.js               ← 语音聊天服务（端口 3001）
+  ├── tools.html                    ← 音乐/语音/聊天室功能页面（主版本）
+  ├── tools-inject.js               ← 注入 tools.html 的脚本
+  ├── server.pem / server-key.pem   ← SSL 证书
+  ├── docker-compose.yml            ← Docker 容器配置
+  ├── frontend\                     ← ArkhamHorror 前端源码
+  │   ├── index.html                ← 前端入口（已注入 tools-inject.js）
+  │   ├── vite.config.js            ← Vite 开发服务器配置
+  │   ├── public\music\             ← 音乐文件夹（放 mp3 进去自动识别）
+  │   ├── public\tools.html         ← tools.html 副本（启动时自动同步）
+  │   └── public\tools-inject.js    ← tools-inject.js 副本（启动时自动同步）
+  │
+  D:\arkham-deckbuilder\            ← 组牌器目录
+  ├── frontend\                     ← 组牌器前端
+  └── local-share-api.cjs           ← 本地分享 API
+
+
+【三、日常使用：开机一键启动】
+
+  步骤：
+  1. 开机，等 Docker Desktop 自动启动（或手动打开它）
+第一次启动要先运行update-ip.ps1更新ip和颁发证书，以后如果ip变换也要运行
+  2. 右键 D:\ArkhamHorror\start-all.ps1 → "使用 PowerShell 运行"
+  3. 等待脚本显示"全部完成！"
+  4. 打开浏览器访问：
+     - 游戏主页:    https://你的ipv4:3443
+     - 组牌器:      https://你的ipv4:3445
+
+  就这么简单！一个脚本搞定所有事情。
+
+  注意：如果浏览器提示"不安全"，点"高级"→"继续前往"即可。
+
+
+【四、IP 地址变了怎么办】
+
+  如果你换了 WiFi 或者路由器重新分配了 IP，需要更新：
+
+  步骤：
+  1. 先查看新 IP：打开 PowerShell，输入 ipconfig，找到 IPv4 地址
+  2. 右键 D:\ArkhamHorror\update-ip.ps1 → "使用 PowerShell 运行"
+  3. 输入新的 IP 地址，回车
+  4. 等待脚本显示"全部完成！"
+  5. 用新 IP 访问即可
+
+  update-ip.ps1 会自动完成以下所有事情：
+  - 停止旧服务
+  - 生成新 SSL 证书
+  - 更新所有配置文件
+  - 修复 Vite 配置
+  - 同步 tools 文件
+  - 重新编译组牌器前端
+  - 重启 Docker 容器
+  - 重启所有服务
+
+
+【五、添加背景音乐】
+
+  把 .mp3 文件丢进这个文件夹即可：
+  D:\ArkhamHorror\frontend\public\music\
+
+  网页会自动读取该文件夹内的音乐，无需重启服务。
+
+
+【六、启动的服务清单】
+
+  服务                   端口      说明
+  ─────────────────────────────────────────────────
+  Docker 容器            3000      ArkhamHorror 游戏后端
+  Vite Dev Server        8080      ArkhamHorror 前端开发服务器
+  HTTPS 代理             3443      游戏主入口（代理到 8080）
+  HTTPS 代理             3445      组牌器入口
+  语音聊天服务           3001      WebSocket 语音聊天
+  本地分享 API           -         组牌器分享功能
+
+
+【七、关闭服务】
+
+  方法一（推荐）：直接关机，下次开机再运行 start-all.ps1
+  方法二（手动）：打开 PowerShell，运行：
+    taskkill /IM node.exe /F
+    docker compose -f D:\ArkhamHorror\docker-compose.yml down
+
+
+【八、常见问题】
+
+  Q: 浏览器显示"此连接不安全"？
+  A: 因为是自签名证书，点"高级"→"继续前往"即可，这是正常的。
+
+  Q: 页面打开但功能（音乐/语音/聊天室）没了？
+  A: 重新运行 start-all.ps1，它会自动同步 tools 文件。
+
+  Q: 手机/平板访问不了？
+  A: 确保手机和电脑连的是同一个 WiFi，用电脑的 IP 地址访问。
+
+  Q: Docker Desktop 没启动？
+  A: start-all.ps1 会等待 Docker 就绪，但最多等 2 分钟。
+     如果超时，请手动打开 Docker Desktop，再重新运行脚本。
+
+  Q: 端口被占用？
+  A: 运行以下命令关闭旧进程后重试：
+     taskkill /IM node.exe /F
+
+  Q: 组牌器分享链接（arkham.build）不工作？
+  A: start-all.ps1 和 update-ip.ps1 都会自动修复 Vite 配置，
+     重新运行脚本即可。
+
+
+【九、备忘】
+
+  当前 IP: 192.168.43.178
+  游戏地址: https://192.168.43.178:3443
+  组牌器:   https://192.168.43.178:3445
+  语音聊天: wss://192.168.43.178:3001
+
+================================================================
+  有问题随时问 Copilot！
+================================================================
+里面好像没有涉及如果docker里容器被删除了如何解决的办法
+Copilot said: 可以把你这套“超级私货离线版”发给朋友安装，但**关键点是：不要把路径写死成 `D:\...`**。只要你把脚本/配置改成“以当前脚本所在目录为基准”（或让用户输入安装目录），朋友装在 `C:\`、`E:\` 都不会出严重问题；否则就会大量报错（找不到文件、证书路径不对、copy 失败、启动失败）。 下面我把你问的 4 件事拆开给一套**可落地的分发/安装方案**（Windows
+可以把你这套“超级私货离线版”发给朋友安装，但关键点是：不要把路径写死成 D:\...。只要你把脚本/配置改成“以当前脚本所在目录为基准”（或让用户输入安装目录），朋友装在 C:\、E:\ 都不会出严重问题；否则就会大量报错（找不到文件、证书路径不对、copy 失败、启动失败）。
+
+下面我把你问的 4 件事拆开给一套可落地的分发/安装方案（Windows + Docker Desktop 场景）。
+
+1) 发给朋友后怎么安装（推荐流程）
+你打包给朋友的内容（建议）
+把整个目录打包成一个压缩包，例如：
+
+ArkhamHorror-portable.zip（里面就是你现在的 D:\ArkhamHorror\ 目录内容）
+arkham-deckbuilder-portable.zip（里面是 D:\arkham-deckbuilder\）
+然后让朋友解压到任意盘任意目录，比如：
+
+E:\Games\ArkhamHorror\
+E:\Games\arkham-deckbuilder\
+朋友机器需要的前置依赖（最少）
+Docker Desktop（并确保能运行 docker compose）
+Node.js（你脚本里跑了 node ... 和 npx vite ...）
+（你用 mkcert.exe）需要 mkcert + 证书信任（一般 mkcert 首次要 mkcert -install）
+你现在的脚本里写了 .\mkcert.exe $ip，说明你把 mkcert.exe 放在 ArkhamHorror 根目录里了，这样挺好：朋友解压就有。
+
+朋友首次启动顺序（你教程里已经有的点，建议写得更明确）
+启动 Docker Desktop
+用 PowerShell 运行 update-ip.ps1（首次必须）
+输入他自己的 IPv4
+这一步会重新签发 server.pem/server-key.pem 并更新 env
+用 PowerShell 运行 start-all.ps1
+浏览器访问：
+https://<他的IP>:3443
+https://<他的IP>:3445
+2) 盘符不同会不会导致安装失败？会，而且是“写死路径”导致的
+你贴出来的脚本/配置里到处是这种硬编码路径：
+
+D:\ArkhamHorror\...
+D:\arkham-deckbuilder\...
+朋友如果解压到 E:\...，这些脚本会直接找不到文件，属于必然失败。
+
+正确做法（核心原则）
+把脚本里所有 D:\ArkhamHorror 改成：
+
+$Root = Split-Path -Parent $MyInvocation.MyCommand.Path（脚本所在目录）
+然后用 Join-Path $Root "frontend\public\tools.html" 这种拼路径
+把 D:\arkham-deckbuilder 改成：
+
+也放到同一个根目录下，比如结构改成：
+...\ArkhamPack\ArkhamHorror\
+...\ArkhamPack\arkham-deckbuilder\
+然后 $DeckRoot = Join-Path $Root "..\arkham-deckbuilder"（或让用户输入一次并保存配置）
+只要做到“相对路径”，盘符怎么变都不怕。
+
+如果你愿意，我可以按你现在的脚本内容，给你一版“可移植版 start-all.ps1 / update-ip.ps1”的完整脚本（全部相对路径化 + 自动探测目录结构）。
+
+3) 离线图包想剔除出来，改成让朋友按 README 指令下载（缩小体积）
+这完全可行，而且是最推荐的发布方式：你的包只带代码与脚本，不带大图；朋友需要离线就自己下载语言包。
+
+你需要做的是：
+
+A. 你打包前把本地图包目录排除
+ArkhamHorror 项目里通常是类似：
+
+frontend/public/img/（或你自己同步出来的资产目录）
+以及可能还有 deckbuilder 的某些 images 目录
+你打包 zip 时把这些大目录排除（或者打包前临时移走）。
+
+B. 在你的“朋友安装教程”里加一段“离线图包下载”
+你贴的 README（看起来是 halogenandtoast/ArkhamHorror 的 README）里已经有命令，例如：
+
+docker compose --profile fetch-images run --rm fetch-images en
+... en+zh、all 等等
+建议你在教程里增加一个“选装离线图包”章节（类似这样）：
+
+（示例写法，你可以直接贴到教程里）
+
+如果你想完全离线（不走 CDN），在 ArkhamHorror 目录运行：
+docker compose --profile fetch-images run --rm fetch-images en
+或 docker compose --profile fetch-images run --rm fetch-images en+zh
+或 docker compose --profile fetch-images run --rm fetch-images all
+下载完成后执行：
+docker compose restart web
+并且提醒：
+
+图包很大（1GB~3GB+），下载耗时取决于网络
+你还可以把这一步做成脚本：download-images.ps1，让朋友选语言（en / en+zh / all），脚本里自动执行 compose 命令并提示完成后 restart。
+
+4) 如果自己误删除了 Docker 容器怎么办（你教程里缺的部分）
+确实该补一节。结论是：容器删了不怕，compose 能重建；最怕的是你把数据卷（volume）也删了（会丢数据库数据）。
+
+场景 1：只删了容器（containers）
+现象：docker ps 看不到相关容器了，但 docker images 还在、compose 文件还在。
+
+解决（在 ArkhamHorror 目录）：
+
+docker compose up -d 这会按 docker-compose.yml 重新创建容器并启动。
+场景 2：删了容器 + 镜像（images）
+现象：docker images 也没了。
+
+解决：
+
+docker compose pull（如果用远端镜像）
+或 docker compose build（如果是本地 build）
+然后 docker compose up -d
+场景 3：把 volumes 也删了（数据真没了）
+例如你做了 docker compose down -v 或 Docker Desktop 清理了 volumes。
+
+后果：
+
+数据库会回到初始状态（用户/进度/存档等可能丢失）
+解决思路：
+
+如果你有备份：恢复 volume 或恢复数据库备份
+没备份：只能重新初始化
+建议你把“防丢档”加进教程（强烈建议）
+你可以加一节：
+
+如何备份 Postgres（compose 里 db 服务）：
+docker exec -t <db容器名> pg_dump ... > backup.sql
+或者直接备份 Docker volume（更简单但更偏高级）
+你接下来要我帮你做什么（两条路，选一个）
+只要文字方案：我把你现在教程补全一版（含“给朋友安装”“图包选装”“容器误删恢复”“盘符不一致说明”），你复制粘贴即可。
+做成真正可分发的一键包：我给你改造 start-all.ps1 / update-ip.ps1 为完全可移植（不依赖 D 盘路径），并额外加：
+install-prereqs-check.ps1（检查 Docker/Node/mkcert）
+download-images.ps1
+repair-docker.ps1（容器/镜像误删后一键恢复）
+你回我两点信息我就能把脚本写到“基本不会翻车”的程度：
+
+你最终希望朋友解压后的目录结构是怎样的？（例如一个总目录里同时包含 ArkhamHorror 和 arkham-deckbuilder，还是分开两个 zip）
+你的 Docker compose 文件实际位置是否固定在 ArkhamHorror\docker-compose.yml？（以及 deckbuilder 是否也有自己的 compose/启动方式）
+You said: 做成真正可分发的一键包
+做成真正可分发的一键包
+Copilot said: 要做成真正可分发的一键包，核心就是两件事： 1) **所有路径相对化/可配置**（彻底消灭 `D:\...`） 2) **把“首次安装/换 IP/下载离线图包/修复
+要做成真正可分发的一键包，核心就是两件事：
+
+所有路径相对化/可配置（彻底消灭 D:\...）
+把“首次安装/换 IP/下载离线图包/修复 Docker”做成一套脚本菜单（朋友照着点就行）
+我现在先给你一个“可落地的打包方案 + 脚本设计”，但要把脚本写到能直接用、且不翻车，我还需要你补 6 个关键信息（不需要你自己查代码，我给你命令，一次性贴结果即可）。
+
+一键包的最终形态（推荐）
+你发给朋友一个压缩包，例如 ArkhamPack.zip，解压后目录长这样：
+
+ArkhamPack\
+ArkhamHorror\（你现在的 D:\ArkhamHorror 内容）
+arkham-deckbuilder\（你现在的 D:\arkham-deckbuilder 内容）
+scripts\
+run.ps1（总入口：菜单）
+start-all.ps1（相对路径版）
+update-ip.ps1（相对路径版）
+download-images.ps1
+repair-docker.ps1
+check-prereqs.ps1
+README-FIRST.txt（朋友只看这一份就能装）
+朋友怎么装：
+
+解压到任意盘任意路径
+右键 scripts\run.ps1 → PowerShell 运行
+按菜单选：①首次安装 ②一键启动 ③下载离线图包 ④换 IP ⑤修复 Docker
+你现在需要给我的 6 份信息（用命令拿，贴回我就行）
+请你在你自己的机器上跑下面命令，把输出贴给我（不用改任何东西）。
+
+1) ArkhamHorror 的 docker compose 内容（决定“容器怎么重建/数据卷叫什么/图包命令是否存在”）
+PowerShell
+Get-Content "D:\ArkhamHorror\docker-compose.yml" -Raw
+2) 你 ArkhamHorror 的 start-all.ps1 和 update-ip.ps1 当前内容（我需要把它们改造成相对路径版本）
+PowerShell
+Get-Content "D:\ArkhamHorror\start-all.ps1" -Raw
+Write-Host "===="
+Get-Content "D:\ArkhamHorror\update-ip.ps1" -Raw
+3) https-proxy.js / voice-server.js 里是否也写死了 D 盘证书路径（需要一起相对化）
+PowerShell
+Select-String -Path "D:\ArkhamHorror\https-proxy.js","D:\ArkhamHorror\voice-server.js" -Pattern "D:\\ArkhamHorror|server\.pem|server-key\.pem"
+4) 你的 ArkhamHorror 前端目录结构确认（避免我假设错）
+PowerShell
+Get-ChildItem "D:\ArkhamHorror\frontend" | Select-Object Name
+Get-ChildItem "D:\ArkhamHorror\frontend\public" | Select-Object Name
+5) deckbuilder 这边的启动方式确认（local-share-api、前端 build、是否也有 docker-compose）
+PowerShell
+Test-Path "D:\arkham-deckbuilder\docker-compose.yml"
+Test-Path "D:\arkham-deckbuilder\local-share-api.cjs"
+Get-ChildItem "D:\arkham-deckbuilder" | Select-Object Name
+6) 你希望“离线图包”到底在哪个目录（我会默认不打包它）
+PowerShell
+# 找出可能很大的 img/music 目录（仅列前 30）
+Get-ChildItem "D:\ArkhamHorror\frontend\public" -Directory |
+  Select-Object Name, @{n="SizeGB";e={[math]::Round((Get-ChildItem $_.FullName -Recurse -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum/1GB,2)}} |
+  Sort-Object SizeGB -Descending | Select-Object -First 30
+我会把“一键包”做到的功能清单（你确认一下）
+首次安装（朋友第一次解压后）
+
+检查 Docker Desktop / Node / mkcert 是否存在
+引导输入本机 IPv4（或自动探测 + 让他确认）
+mkcert -install（若需要）+ 签发证书
+写入 .env（ArkhamHorror 与 deckbuilder 的 env）
+同步 tools.html / tools-inject.js 到正确 public 位置
+可选：让朋友选择是否下载离线图包
+一键启动
+
+等待 docker 就绪
+docker compose up -d
+启动：https-proxy.js、voice-server.js、local-share-api.cjs、vite dev
+输出访问地址（用检测到的 IP）
+下载离线图包（可选）
+
+菜单：en / en+zh / all（或你要的其它语言）
+执行 compose profile 的 fetch-images
+完成后自动 docker compose restart web
+修复 Docker（容器误删/镜像误删）
+
+一键：docker compose pull（如适用）→ docker compose up -d
+提醒：如果 volume 被删，数据可能不可恢复（给备份建议）
+重要提醒（避免你“发给朋友就翻车”）
+你现在的脚本里还有一个潜在坑：taskkill /IM node.exe /F 会杀掉朋友机器上所有 Node 进程（包括他正在跑的别的项目）。
+我会改成更安全的做法：只杀我们启动的进程（记录 PID 到 runtime\pids.json），或者按端口精准停掉。
+
+把上面 6 份输出贴给我后，我就能：
+
+给你生成一套完全相对路径的脚本（run.ps1 + start/update/download/repair/check）
+给你一份“朋友安装说明 README-FIRST.txt”
+并告诉你打包时应该排除哪些目录（图包/缓存/node_modules）来显著减小体积
+你先贴 第 1-3 项也行（compose + 两个 ps1 + proxy/voice 关键路径），我就可以先把“最核心的可移植启动/换 IP”做出来。
+
+You said: 我没有任何代码学习基础，请你一步骤一步骤让我干我干完了给你反馈你再让我做下一步
+我没有任何代码学习基础，请你一步骤一步骤让我干我干完了给你反馈你再让我做下一步
+Copilot said: 好。我们按“你做一步 → 贴结果 → 我再给下一步”的方式来做。**现在只做第 1 步：把
+好。我们按“你做一步 → 贴结果 → 我再给下一步”的方式来做。现在只做第 1 步：把 docker-compose.yml 内容发给我（这是后面一键包能不能自动重建容器、下载离线图包的关键）。
+
+第 1 步：把 docker-compose.yml 发给我
+在 Windows 打开 PowerShell（开始菜单搜 PowerShell）。
+
+复制粘贴下面这条命令回车：
+
+PowerShell
+Get-Content "D:\ArkhamHorror\docker-compose.yml" -Raw
+把 PowerShell 输出的全部内容复制出来，直接粘贴到这里。
+如果你运行后报错（比如路径不存在）
+把报错原样贴给我（不要自己改）。
+
+You said: services: db: image:
+services:
+  db:
+    image: postgres:14.6-alpine
+    restart: always
+    environment:
+      - POSTGRES_USER=arkham_pg_user
+      - POSTGRES_PASSWORD_FILE=/run/secrets/postgres_password
+      - POSTGRES_DB=arkham-horror-backend
+    ports:
+      - "127.0.0.1:5433:5432"
+    user: postgres
+    cap_drop:
+      - ALL
+    mem_limit: 512M
+    cpus: '0.5'
+    volumes:
+      - pgdata:/var/lib/postgresql/data:rw
+      - ./setup.sql:/docker-entrypoint-initdb.d/create_tables.sql:ro
+    secrets:
+      - postgres_password
+  web:
+    image: "halogenandtoast/arkham-horror:latest"
+    build:
+      context: .
+      args:
+        - GHC_VERSION=9.12.2
+    secrets:
+      - postgres_password
+    ports:
+      - "3000:3000"
+    depends_on:
+      - db
+    volumes:
+      - ./frontend/public/img:/opt/arkham/src/frontend/dist/img
+      - ./tools.html:/opt/arkham/src/frontend/dist/tools.html
+      - ./tools-inject.js:/opt/arkham/src/frontend/dist/tools-inject.js
+      - ./frontend/public/music:/opt/arkham/src/frontend/dist/music
+      - ./index-override.html:/opt/arkham/src/frontend/dist/index.html
+  fetch-images:
+    profiles: ["fetch-images"]
+    image: amazon/aws-cli
+    volumes:
+      - ./frontend/public/img:/workspace/frontend/public/img
+      - ./scripts/fetch-assets.sh:/workspace/scripts/fetch-assets.sh:ro
+    entrypoint: ["/bin/bash", "/workspace/scripts/fetch-assets.sh"]
+    command: en
+volumes:
+ pgdata:
+secrets:
+  postgres_password:
+    file: ./config/postgres_password.txt
+Copilot said: 很好。你这个 `docker-compose.yml` 关键信息齐了： - 数据库用的是 **volume：`pgdata`**（只要不删 volume，容器删了也能重建且数据还在） - 离线图包下载用的是
+很好。你这个 docker-compose.yml 关键信息齐了：
+
+数据库用的是 volume：pgdata（只要不删 volume，容器删了也能重建且数据还在）
+离线图包下载用的是 fetch-images profile（我们可以做成菜单：en / en+zh / all）
+web 里把 tools.html / tools-inject.js / music / img / index-override.html 都挂载进容器（所以你现在其实是“容器内 dist 被外部文件覆盖”）
+接下来做 第 2 步：把你当前的两个脚本内容发给我，我才能开始把它们改成“无论装在哪个盘都能跑”的可移植版本。
+
+第 2 步：把 start-all.ps1 和 update-ip.ps1 内容发给我
+在 PowerShell 里依次运行下面这两条命令（可以一次性复制粘贴一起运行）：
+
+PowerShell
+Get-Content "D:\ArkhamHorror\start-all.ps1" -Raw
+Write-Host "===="
+Get-Content "D:\ArkhamHorror\update-ip.ps1" -Raw
+把输出的全部内容复制粘贴到这里。
+
+如果输出太长、复制不方便
+告诉我，我会让你把它们导出成两个 txt 文件再发我内容（不会让你学复杂操作）。
+
+You said: services: db: image:
+services:
+  db:
+    image: postgres:14.6-alpine
+    restart: always
+    environment:
+      - POSTGRES_USER=arkham_pg_user
+      - POSTGRES_PASSWORD_FILE=/run/secrets/postgres_password
+      - POSTGRES_DB=arkham-horror-backend
+    ports:
+      - "127.0.0.1:5433:5432"
+    user: postgres
+    cap_drop:
+      - ALL
+    mem_limit: 512M
+    cpus: '0.5'
+    volumes:
+      - pgdata:/var/lib/postgresql/data:rw
+      - ./setup.sql:/docker-entrypoint-initdb.d/create_tables.sql:ro
+    secrets:
+      - postgres_password
+  web:
+    image: "halogenandtoast/arkham-horror:latest"
+    build:
+      context: .
+      args:
+        - GHC_VERSION=9.12.2
+    secrets:
+      - postgres_password
+    ports:
+      - "3000:3000"
+    depends_on:
+      - db
+    volumes:
+      - ./frontend/public/img:/opt/arkham/src/frontend/dist/img
+      - ./tools.html:/opt/arkham/src/frontend/dist/tools.html
+      - ./tools-inject.js:/opt/arkham/src/frontend/dist/tools-inject.js
+      - ./frontend/public/music:/opt/arkham/src/frontend/dist/music
+      - ./index-override.html:/opt/arkham/src/frontend/dist/index.html
+  fetch-images:
+    profiles: ["fetch-images"]
+    image: amazon/aws-cli
+    volumes:
+      - ./frontend/public/img:/workspace/frontend/public/img
+      - ./scripts/fetch-assets.sh:/workspace/scripts/fetch-assets.sh:ro
+    entrypoint: ["/bin/bash", "/workspace/scripts/fetch-assets.sh"]
+    command: en
+volumes:
+ pgdata:
+secrets:
+  postgres_password:
+    file: ./config/postgres_password.txt
+Copilot said: 你刚才贴的还是 `docker-compose.yml`，不是 `start-all.ps1` 和 `update-ip.ps1` 的内容。 没关系，重新运行一下这条命令： --- ## 第
+你刚才贴的还是 docker-compose.yml，不是 start-all.ps1 和 update-ip.ps1 的内容。
+
+没关系，重新运行一下这条命令：
+
+第 2 步：运行这条命令，把结果贴给我
+在 PowerShell 里复制粘贴这整段，然后回车：
+
+PowerShell
+Get-Content "D:\ArkhamHorror\start-all.ps1" -Raw
+Write-Host "===="
+Get-Content "D:\ArkhamHorror\update-ip.ps1" -Raw
+把 PowerShell 窗口里输出的全部文字复制出来贴给我。
+
+You said: PS C:\Users\MECHREV> Write-Host "====" ==== PS C:\Users\MECHREV> Get-Content "D:\ArkhamHorror\update-ip.ps1"
+PS C:\Users\MECHREV> Write-Host "===="
+====
+PS C:\Users\MECHREV> Get-Content "D:\ArkhamHorror\update-ip.ps1" -Raw
+$ip = Read-Host "请输入新的IP地址（例如 192.168.1.100）"
+
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "  IP 地址将更新为: $ip" -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host ""
+
+Write-Host "[1/8] 正在停止所有 Node 进程..." -ForegroundColor Yellow
+taskkill /IM node.exe /F 2>$null
+Start-Sleep -Seconds 2
+Write-Host "  -> 已停止" -ForegroundColor Green
+
+Write-Host "[2/8] 正在生成新的 SSL 证书..." -ForegroundColor Yellow
+Remove-Item "D:\ArkhamHorror\server.pem" -ErrorAction SilentlyContinue -Force
+Remove-Item "D:\ArkhamHorror\server-key.pem" -ErrorAction SilentlyContinue -Force
+Push-Location "D:\ArkhamHorror"
+.\mkcert.exe $ip
+Pop-Location
+Rename-Item "D:\ArkhamHorror\$ip.pem" "server.pem" -Force
+Rename-Item "D:\ArkhamHorror\$ip-key.pem" "server-key.pem" -Force
+Write-Host "  -> 证书已更新" -ForegroundColor Green
+
+Write-Host "[3/8] 正在更新配置文件..." -ForegroundColor Yellow
+$timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+$lines = @(
+    "# 本地私人 arkham.build 配置",
+    "# 自动生成于 $timestamp",
+    "# IP: $ip",
+    "",
+    "VITE_API_LEGACY_URL=https://${ip}:3445",
+    "VITE_CARD_IMAGE_URL=https://${ip}:3445/card-images",
+    "VITE_PAGE_NAME=arkham.build (本地)",
+    "VITE_ARKHAMDB_BASE_URL=https://arkhamdb.com",
+    "VITE_API_URL=https://${ip}:3445",
+    "VITE_SHOW_PREVIEW_BANNER=false"
+)
+$lines | Out-File -FilePath "D:\arkham-deckbuilder\frontend\.env" -Encoding UTF8
+Set-Content "D:\ArkhamHorror\frontend\.env" "VITE_ARKHAM_BUILD_API_URL=https://${ip}:3445"
+Write-Host "  -> 配置文件已更新" -ForegroundColor Green
+
+Write-Host "[4/8] 正在确保 Vite 配置正确..." -ForegroundColor Yellow
+$viteConfig = Get-Content "D:\ArkhamHorror\frontend\vite.config.js" -Raw
+$needFix = $false
+if ($viteConfig -match 'http://127\.0\.0\.1:3002') {
+    $viteConfig = $viteConfig -replace 'http://127\.0\.0\.1:3002', 'http://127.0.0.1:3000'
+    $needFix = $true
+}
+if ($viteConfig -match 'target:\s*"https?://arkham\.build"') {
+    $viteConfig = $viteConfig -replace 'target:\s*"https?://arkham\.build"', 'target: "https://api.arkham.build"'
+    $needFix = $true
+}
+if ($needFix) {
+    Set-Content "D:\ArkhamHorror\frontend\vite.config.js" $viteConfig
+    Write-Host "  -> Vite 配置已自动修复" -ForegroundColor Green
+} else {
+    Write-Host "  -> Vite 配置正确，无需修改" -ForegroundColor Green
+}
+
+Write-Host "[5/8] 正在同步最新 tools 文件到前端..." -ForegroundColor Yellow
+Copy-Item "D:\ArkhamHorror\tools.html" "D:\ArkhamHorror\frontend\public\tools.html" -Force
+Copy-Item "D:\ArkhamHorror\tools-inject.js" "D:\ArkhamHorror\frontend\public\tools-inject.js" -Force
+$indexHtml = Get-Content "D:\ArkhamHorror\frontend\index.html" -Raw
+if ($indexHtml -notmatch 'tools-inject\.js') {
+    $indexHtml = $indexHtml -replace '</body>', '    <script src="/tools-inject.js" defer></script>
+</body>'
+    Set-Content "D:\ArkhamHorror\frontend\index.html" $indexHtml
+    Write-Host "  -> index.html 已注入 tools-inject.js" -ForegroundColor Green
+} else {
+    Write-Host "  -> index.html 已包含 tools-inject.js" -ForegroundColor Green
+}
+Write-Host "  -> tools 文件已同步" -ForegroundColor Green
+
+Write-Host "[6/8] 正在重新编译 arkham-deckbuilder 前端..." -ForegroundColor Yellow
+Push-Location "D:\arkham-deckbuilder\frontend"
+npx vite build
+$buildResult = $LASTEXITCODE
+Pop-Location
+if ($buildResult -ne 0) {
+    Write-Host "  -> arkham-deckbuilder 前端编译失败！请检查错误信息" -ForegroundColor Red
+    Read-Host "按回车退出"
+    exit 1
+}
+Write-Host "  -> arkham-deckbuilder 前端编译完成" -ForegroundColor Green
+
+Write-Host "[7/8] 正在确保 Docker 容器运行..." -ForegroundColor Yellow
+Push-Location "D:\ArkhamHorror"
+docker compose up -d
+Pop-Location
+Start-Sleep -Seconds 3
+Write-Host "  -> Docker 容器已启动" -ForegroundColor Green
+
+Write-Host "[8/8] 正在重启所有服务..." -ForegroundColor Yellow
+Start-Process "node" -ArgumentList "D:\ArkhamHorror\https-proxy.js" -WindowStyle Minimized
+Start-Process "node" -ArgumentList "D:\ArkhamHorror\voice-server.js" -WindowStyle Minimized
+Start-Process "node" -ArgumentList "D:\arkham-deckbuilder\local-share-api.cjs" -WindowStyle Minimized
+Start-Process powershell -ArgumentList "-Command cd D:\ArkhamHorror\frontend; npx vite dev" -WindowStyle Minimized
+Start-Sleep -Seconds 5
+Write-Host "  -> 所有服务已启动" -ForegroundColor Green
+
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Green
+Write-Host "  全部完成！IP 已更新为 $ip" -ForegroundColor Green
+Write-Host "========================================" -ForegroundColor Green
+Write-Host ""
+Write-Host "  ArkhamHorror 游戏:    https://${ip}:3443" -ForegroundColor Cyan
+Write-Host "  语音聊天:             wss://${ip}:3001" -ForegroundColor Cyan
+Write-Host "  Arkham 组牌器:        https://${ip}:3445" -ForegroundColor Cyan
+Write-Host ""
+Read-Host "按回车关闭窗口"
+Copilot said: 好，我看到 `update-ip.ps1` 了。但 `start-all.ps1` 的内容没有出现在输出里（可能是命令没完整运行）。 --- ## 第 3
+好，我看到 update-ip.ps1 了。但 start-all.ps1 的内容没有出现在输出里（可能是命令没完整运行）。
+
+第 3 步：单独拿 start-all.ps1 内容
+在 PowerShell 里运行这一条命令：
+
+PowerShell
+Get-Content "D:\ArkhamHorror\start-all.ps1" -Raw
+把输出全部贴给我。
+
+You said: Write-Host "" Write-Host "========================================" -ForegroundColor Cyan Write-Host "
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "  ArkhamHorror 一键启动" -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host ""
+
+Write-Host "[1/5] 正在等待 Docker Desktop 就绪..." -ForegroundColor Yellow
+$ready = $false
+for ($i = 0; $i -lt 60; $i++) {
+    try {
+        $info = docker info 2>&1
+        if ($LASTEXITCODE -eq 0) { $ready = $true; break }
+    } catch {}
+    Start-Sleep -Seconds 2
+}
+if (-not $ready) {
+    Write-Host "  -> Docker Desktop 未就绪，请先手动启动 Docker Desktop！" -ForegroundColor Red
+    Read-Host "按回车退出"
+    exit 1
+}
+Write-Host "  -> Docker Desktop 已就绪" -ForegroundColor Green
+
+Write-Host "[2/5] 正在启动 Docker 容器..." -ForegroundColor Yellow
+Push-Location "D:\ArkhamHorror"
+docker compose up -d
+Pop-Location
+Start-Sleep -Seconds 3
+Write-Host "  -> Docker 容器已启动" -ForegroundColor Green
+
+Write-Host "[3/5] 正在同步最新 tools.html 到前端..." -ForegroundColor Yellow
+Copy-Item "D:\ArkhamHorror\tools.html" "D:\ArkhamHorror\frontend\public\tools.html" -Force
+Copy-Item "D:\ArkhamHorror\tools-inject.js" "D:\ArkhamHorror\frontend\public\tools-inject.js" -Force
+Write-Host "  -> tools 文件已同步" -ForegroundColor Green
+
+Write-Host "[4/5] 正在确保 Vite 配置正确..." -ForegroundColor Yellow
+$viteConfig = Get-Content "D:\ArkhamHorror\frontend\vite.config.js" -Raw
+$needFix = $false
+if ($viteConfig -match 'http://127\.0\.0\.1:3002') {
+    $viteConfig = $viteConfig -replace 'http://127\.0\.0\.1:3002', 'http://127.0.0.1:3000'
+    $needFix = $true
+}
+if ($viteConfig -match 'target:\s*"https?://arkham\.build"') {
+    $viteConfig = $viteConfig -replace 'target:\s*"https?://arkham\.build"', 'target: "https://api.arkham.build"'
+    $needFix = $true
+}
+if ($needFix) {
+    Set-Content "D:\ArkhamHorror\frontend\vite.config.js" $viteConfig
+    Write-Host "  -> Vite 配置已自动修复" -ForegroundColor Green
+} else {
+    Write-Host "  -> Vite 配置正确，无需修改" -ForegroundColor Green
+}
+$indexHtml = Get-Content "D:\ArkhamHorror\frontend\index.html" -Raw
+if ($indexHtml -notmatch 'tools-inject\.js') {
+    $indexHtml = $indexHtml -replace '</body>', '    <script src="/tools-inject.js" defer></script>
+</body>'
+    Set-Content "D:\ArkhamHorror\frontend\index.html" $indexHtml
+    Write-Host "  -> index.html 已注入 tools-inject.js" -ForegroundColor Green
+} else {
+    Write-Host "  -> index.html 已包含 tools-inject.js" -ForegroundColor Green
+}
+
+Write-Host "[5/5] 正在启动所有服务..." -ForegroundColor Yellow
+Start-Process "node" -ArgumentList "D:\ArkhamHorror\https-proxy.js" -WindowStyle Minimized
+Start-Process "node" -ArgumentList "D:\ArkhamHorror\voice-server.js" -WindowStyle Minimized
+Start-Process "node" -ArgumentList "D:\arkham-deckbuilder\local-share-api.cjs" -WindowStyle Minimized
+Start-Process powershell -ArgumentList "-Command cd D:\ArkhamHorror\frontend; npx vite dev" -WindowStyle Minimized
+Start-Sleep -Seconds 5
+Write-Host "  -> 所有服务已启动" -ForegroundColor Green
+
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Green
+Write-Host "  全部完成！" -ForegroundColor Green
+Write-Host "========================================" -ForegroundColor Green
+Write-Host ""
+Write-Host "  ArkhamHorror 游戏:    https://192.168.43.178:3443" -ForegroundColor Cyan
+Write-Host "  语音聊天:             wss://192.168.43.178:3001" -ForegroundColor Cyan
+Write-Host "  Arkham 组牌器:        https://192.168.43.178:3445" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "  （如果 IP 地址变了，请运行 update-ip.ps1）" -ForegroundColor DarkYellow
+Write-Host ""
+Read-Host "按回车关闭窗口"
+Copilot said: 好，两个脚本都拿到了。现在做第 4 步，还需要最后 3 份信息，拿完我就能开始写所有脚本了。 --- ## 第 4
+好，两个脚本都拿到了。现在做第 4 步，还需要最后 3 份信息，拿完我就能开始写所有脚本了。
+
+第 4 步：运行这条命令，把结果贴给我
+在 PowerShell 里复制粘贴下面整段，回车：
+
+PowerShell
+Write-Host "=== proxy/voice 证书路径 ===" -ForegroundColor Cyan
+Select-String -Path "D:\ArkhamHorror\https-proxy.js","D:\ArkhamHorror\voice-server.js" -Pattern "D:\\\\|server\.pem|server-key\.pem"
+
+Write-Host ""
+Write-Host "=== ArkhamHorror frontend 目录 ===" -ForegroundColor Cyan
+Get-ChildItem "D:\ArkhamHorror\frontend" | Select-Object Name
+Get-ChildItem "D:\ArkhamHorror\frontend\public" | Select-Object Name
+
+Write-Host ""
+Write-Host "=== arkham-deckbuilder 目录 ===" -ForegroundColor Cyan
+Test-Path "D:\arkham-deckbuilder\docker-compose.yml"
+Test-Path "D:\arkham-deckbuilder\local-share-api.cjs"
+Get-ChildItem "D:\arkham-deckbuilder" | Select-Object Name
+
+Write-Host ""
+Write-Host "=== public 子目录大小 ===" -ForegroundColor Cyan
+Get-ChildItem "D:\ArkhamHorror\frontend\public" -Directory |
+  Select-Object Name, @{n="SizeGB";e={[math]::Round((Get-ChildItem $_.FullName -Recurse -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum/1GB,2)}} |
+  Sort-Object SizeGB -Descending
+把全部输出贴给我。
+
+You said: PS C:\Users\MECHREV> Write-Host "=== proxy/voice 证书路径 ==="
+PS C:\Users\MECHREV> Write-Host "=== proxy/voice 证书路径 ===" -ForegroundColor Cyan
+=== proxy/voice 证书路径 ===
+PS C:\Users\MECHREV> Select-String -Path "D:\ArkhamHorror\https-proxy.js","D:\ArkhamHorror\voice-server.js" -Pattern "D:\\\\|server\.pem|server-key\.pem"
+
+D:\ArkhamHorror\https-proxy.js:10:  cert: fs.readFileSync("D:\\ArkhamHorror\\server.pem"),
+D:\ArkhamHorror\https-proxy.js:11:  key: fs.readFileSync("D:\\ArkhamHorror\\server-key.pem")
+D:\ArkhamHorror\https-proxy.js:102:const deckDir = "D:\\arkham-deckbuilder\\frontend\\dist";
+D:\ArkhamHorror\https-proxy.js:240:const musicDir = "D:\\ArkhamHorror\\frontend\\public\\music";
+D:\ArkhamHorror\voice-server.js:7:  cert: fs.readFileSync("D:\\ArkhamHorror\\server.pem"),
+D:\ArkhamHorror\voice-server.js:8:  key: fs.readFileSync("D:\\ArkhamHorror\\server-key.pem")
+
+
+PS C:\Users\MECHREV>
+PS C:\Users\MECHREV> Write-Host ""
+
+PS C:\Users\MECHREV> Write-Host "=== ArkhamHorror frontend 目录 ===" -ForegroundColor Cyan
+=== ArkhamHorror frontend 目录 ===
+PS C:\Users\MECHREV> Get-ChildItem "D:\ArkhamHorror\frontend" | Select-Object Name
+
+Name
+----
+dist
+node_modules
+public
+scripts
+src
+.env
+.eslintrc.cjs
+.gitignore
+.ignore
+env.d.ts
+image-manifest.json
+index.html
+package-lock.json
+package.json
+README.md
+tsconfig.json
+vite.config.js
+
+
+PS C:\Users\MECHREV> Get-ChildItem "D:\ArkhamHorror\frontend\public" | Select-Object Name
+
+Name
+----
+fonts
+img
+music
+voice
+cards.json
+cards_de.json
+cards_en.json
+cards_es.json
+cards_fr.json
+cards_it.json
+cards_ja.json
+cards_ko.json
+cards_pl.json
+cards_po.json
+cards_ru.json
+cards_uk.json
+cards_zh.json
+favicon.ico
+robots.txt
+tools-inject.js
+tools.html
+
+
+PS C:\Users\MECHREV>
+PS C:\Users\MECHREV> Write-Host ""
+
+PS C:\Users\MECHREV> Write-Host "=== arkham-deckbuilder 目录 ===" -ForegroundColor Cyan
+=== arkham-deckbuilder 目录 ===
+PS C:\Users\MECHREV> Test-Path "D:\arkham-deckbuilder\docker-compose.yml"
+False
+PS C:\Users\MECHREV> Test-Path "D:\arkham-deckbuilder\local-share-api.cjs"
+True
+PS C:\Users\MECHREV> Get-ChildItem "D:\arkham-deckbuilder" | Select-Object Name
+
+Name
+----
+.github
+.vscode
+backend
+frontend
+functions
+node_modules
+shared
+test
+.editorconfig
+.gitignore
+biome.json
+lefthook.yml
+LICENSE
+local-share-api.cjs
+package-lock.json
+package.json
+README.md
+shares.json
+wrangler.toml
+
+
+PS C:\Users\MECHREV>
+PS C:\Users\MECHREV> Write-Host ""
+
+PS C:\Users\MECHREV> Write-Host "=== public 子目录大小 ===" -ForegroundColor Cyan
+=== public 子目录大小 ===
+PS C:\Users\MECHREV> Get-ChildItem "D:\ArkhamHorror\frontend\public" -Directory |
+>>   Select-Object Name, @{n="SizeGB";e={[math]::Round((Get-ChildItem $_.FullName -Recurse -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum/1GB,2)}} |
+>>   Sort-Object SizeGB -Descending
+
+Name  SizeGB
+----  ------
+img     2.62
+music   0.06
+fonts   0.01
+voice      0
+
+Copilot said: 好，所有信息都齐了。我现在完全清楚你的结构了： - `https-proxy.js` 和 `voice-server.js` 里有 4 处写死的
+好，所有信息都齐了。我现在完全清楚你的结构了：
+
+https-proxy.js 和 voice-server.js 里有 4 处写死的 D:\ 路径需要改
+img 目录 2.62GB → 打包时必须排除，让朋友自己下载
+music 0.06GB → 你可以选择带或不带（我建议带，不大）
+arkham-deckbuilder 没有自己的 docker-compose，只有 local-share-api.cjs
+现在我们正式开始做脚本。先从最核心的文件改起：https-proxy.js，把里面 4 处写死的路径改成"自动识别当前目录"。
+
+第 5 步：运行这条命令（修改 https-proxy.js 的路径）
+在 PowerShell 里复制粘贴下面整段，回车：
+
+PowerShell
+$file = "D:\ArkhamHorror\https-proxy.js"
+$content = Get-Content $file -Raw
+
+# 把4处写死路径全部改成相对路径（用 __dirname 自动识别当前目录）
+$content = $content -replace 'fs\.readFileSync\("D:\\\\ArkhamHorror\\\\server\.pem"\)', 'fs.readFileSync(require("path").join(__dirname, "server.pem"))'
+$content = $content -replace 'fs\.readFileSync\("D:\\\\ArkhamHorror\\\\server-key\.pem"\)', 'fs.readFileSync(require("path").join(__dirname, "server-key.pem"))'
+$content = $content -replace '"D:\\\\arkham-deckbuilder\\\\frontend\\\\dist"', 'require("path").join(__dirname, "..", "arkham-deckbuilder", "frontend", "dist")'
+$content = $content -replace '"D:\\\\ArkhamHorror\\\\frontend\\\\public\\\\music"', 'require("path").join(__dirname, "frontend", "public", "music")'
+
+Set-Content $file $content -Encoding UTF8
+Write-Host "完成" -ForegroundColor Green
+运行完告诉我结果（显示"完成"就是成功）。
+
+You said: 完成
+完成
+Copilot said: 好。现在改 `voice-server.js`。 ## 第 6 步：运行这条命令（修改 voice-server.js 的路径） 在
+好。现在改 voice-server.js。
+
+第 6 步：运行这条命令（修改 voice-server.js 的路径）
+在 PowerShell 里复制粘贴下面整段，回车：
+
+PowerShell
+$file = "D:\ArkhamHorror\voice-server.js"
+$content = Get-Content $file -Raw
+
+$content = $content -replace 'fs\.readFileSync\("D:\\\\ArkhamHorror\\\\server\.pem"\)', 'fs.readFileSync(require("path").join(__dirname, "server.pem"))'
+$content = $content -replace 'fs\.readFileSync\("D:\\\\ArkhamHorror\\\\server-key\.pem"\)', 'fs.readFileSync(require("path").join(__dirname, "server-key.pem"))'
+
+Set-Content $file $content -Encoding UTF8
+Write-Host "完成" -ForegroundColor Green
+运行完告诉我结果。
+
+You said: 完成
+完成
+Copilot said: 好。现在验证一下两个文件改对了没有。 ## 第 7 步：运行这条命令（确认修改正确） ```powershell Select-String -Path "D:\ArkhamHorror\https-proxy.js","D:\ArkhamHorror\voice-server.js" -Pattern
+好。现在验证一下两个文件改对了没有。
+
+第 7 步：运行这条命令（确认修改正确）
+PowerShell
+Select-String -Path "D:\ArkhamHorror\https-proxy.js","D:\ArkhamHorror\voice-server.js" -Pattern "D:\\\\|server\.pem|server-key\.pem|__dirname"
+把输出全部贴给我。
+
+You said: D:\ArkhamHorror\https-proxy.js:10: cert: fs.readFileSync(require("path").join(__dirname, "server.pem")), D:\ArkhamHorror\https-proxy.js:11: key:
+D:\ArkhamHorror\https-proxy.js:10:  cert: fs.readFileSync(require("path").join(__dirname, "server.pem")),
+D:\ArkhamHorror\https-proxy.js:11:  key: fs.readFileSync(require("path").join(__dirname, "server-key.pem"))
+D:\ArkhamHorror\https-proxy.js:102:const deckDir = require("path").join(__dirname, "..", "arkham-deckbuilder", "fronten
+d", "dist");
+D:\ArkhamHorror\https-proxy.js:240:const musicDir = require("path").join(__dirname, "frontend", "public", "music");
+D:\ArkhamHorror\voice-server.js:7:  cert: fs.readFileSync(require("path").join(__dirname, "server.pem")),
+D:\ArkhamHorror\voice-server.js:8:  key: fs.readFileSync(require("path").join(__dirname, "server-key.pem"))
+
+Copilot said: 完美。4处路径全部改正确了，没有任何残留的 `D:\` 硬编码。 现在开始写新的脚本文件。先写  重要的总入口菜单 `run.ps1`。 ## 第 8 步：运行这条命令（创建
+完美。4处路径全部改正确了，没有任何残留的 D:\ 硬编码。
+
+现在开始写新的脚本文件。先写  重要的总入口菜单 run.ps1。
+
+第 8 步：运行这条命令（创建 run.ps1）
+PowerShell
+@'
+# ================================================
+#  ArkhamHorror 一键包 - 总入口
+# ================================================
+$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$AH   = Join-Path $Root "ArkhamHorror"
+$AD   = Join-Path $Root "arkham-deckbuilder"
+
+while ($true) {
+    Clear-Host
+    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host "   ArkhamHorror 一键包" -ForegroundColor Cyan
+    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "  [1] 首次安装（第一次用必选）" -ForegroundColor Yellow
+    Write-Host "  [2] 一键启动服务器" -ForegroundColor Green
+    Write-Host "  [3] 更换 IP / 重新签发证书" -ForegroundColor White
+    Write-Host "  [4] 下载离线图包（可选，约1-3GB）" -ForegroundColor White
+    Write-Host "  [5] 修复 Docker 容器（误删后用）" -ForegroundColor White
+    Write-Host "  [6] 退出" -ForegroundColor DarkGray
+    Write-Host ""
+    $choice = Read-Host "请输入数字选择"
+
+    switch ($choice) {
+        "1" { & "$Root\scripts\install.ps1" -Root $Root -AH $AH -AD $AD }
+        "2" { & "$Root\scripts\start-all.ps1" -Root $Root -AH $AH -AD $AD }
+        "3" { & "$Root\scripts\update-ip.ps1" -Root $Root -AH $AH -AD $AD }
+        "4" { & "$Root\scripts\download-images.ps1" -AH $AH }
+        "5" { & "$Root\scripts\repair-docker.ps1" -AH $AH }
+        "6" { exit }
+        default { Write-Host "请输入 1-6" -ForegroundColor Red; Start-Sleep -Seconds 2 }
+    }
+}
+'@ | Set-Content "D:\ArkhamHorror\run.ps1" -Encoding UTF8
+Write-Host "完成" -ForegroundColor Green
+运行完告诉我结果。
+
+You said: 完成
+完成
+Copilot said: 好。现在创建 scripts 目录，然后写第一个子脚本：`install.ps1`（朋友第一次安装时用）。 ## 第 9 步：运行这条命令（创建 scripts
+好。现在创建 scripts 目录，然后写第一个子脚本：install.ps1（朋友第一次安装时用）。
+
+第 9 步：运行这条命令（创建 scripts 目录 + install.ps1）
+PowerShell
+New-Item -ItemType Directory -Path "D:\ArkhamHorror\scripts" -Force | Out-Null
+
+@'
+param($Root, $AH, $AD)
+
+Clear-Host
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "   首次安装向导" -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host ""
+
+# 检查 Docker
+Write-Host "[1/6] 检查 Docker Desktop..." -ForegroundColor Yellow
+try {
+    docker info 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw }
+    Write-Host "  -> Docker Desktop 已就绪" -ForegroundColor Green
+} catch {
+    Write-Host "  -> 未检测到 Docker Desktop！" -ForegroundColor Red
+    Write-Host "     请先安装并启动 Docker Desktop：https://www.docker.com/" -ForegroundColor Red
+    Read-Host "安装完成后按回车重试，或关闭窗口去安装"
+    exit 1
+}
+
+# 检查 Node.js
+Write-Host "[2/6] 检查 Node.js..." -ForegroundColor Yellow
+try {
+    $nodeVer = node --version 2>&1
+    if ($LASTEXITCODE -ne 0) { throw }
+    Write-Host "  -> Node.js 已安装：$nodeVer" -ForegroundColor Green
+} catch {
+    Write-Host "  -> 未检测到 Node.js！" -ForegroundColor Red
+    Write-Host "     请先安装 Node.js：https://nodejs.org/" -ForegroundColor Red
+    Read-Host "安装完成后按回车重试，或关闭窗口去安装"
+    exit 1
+}
+
+# 检查 mkcert.exe
+Write-Host "[3/6] 检查 mkcert..." -ForegroundColor Yellow
+$mkcert = Join-Path $AH "mkcert.exe"
+if (-not (Test-Path $mkcert)) {
+    Write-Host "  -> 未找到 mkcert.exe！" -ForegroundColor Red
+    Write-Host "     请确认 mkcert.exe 在 ArkhamHorror 目录里" -ForegroundColor Red
+    Read-Host "按回车退出"
+    exit 1
+}
+Write-Host "  -> mkcert.exe 已找到" -ForegroundColor Green
+
+# 安装 mkcert 根证书（让浏览器信任）
+Write-Host "[4/6] 安装本地根证书（让浏览器不报"不安全"）..." -ForegroundColor Yellow
+Push-Location $AH
+.\mkcert.exe -install
+Pop-Location
+Write-Host "  -> 根证书已安装" -ForegroundColor Green
+
+# 安装 node_modules
+Write-Host "[5/6] 安装前端依赖..." -ForegroundColor Yellow
+$frontendNM = Join-Path $AH "frontend\node_modules"
+if (-not (Test-Path $frontendNM)) {
+    Write-Host "  -> 正在安装 ArkhamHorror 前端依赖（首次较慢）..." -ForegroundColor Yellow
+    Push-Location (Join-Path $AH "frontend")
+    npm install
+    Pop-Location
+} else {
+    Write-Host "  -> ArkhamHorror 前端依赖已存在，跳过" -ForegroundColor Green
+}
+
+$deckNM = Join-Path $AD "node_modules"
+if (-not (Test-Path $deckNM)) {
+    Write-Host "  -> 正在安装 arkham-deckbuilder 依赖（首次较慢）..." -ForegroundColor Yellow
+    Push-Location $AD
+    npm install
+    Pop-Location
+} else {
+    Write-Host "  -> arkham-deckbuilder 依赖已存在，跳过" -ForegroundColor Green
+}
+
+$deckFrontNM = Join-Path $AD "frontend\node_modules"
+if (-not (Test-Path $deckFrontNM)) {
+    Write-Host "  -> 正在安装 arkham-deckbuilder 前端依赖..." -ForegroundColor Yellow
+    Push-Location (Join-Path $AD "frontend")
+    npm install
+    Pop-Location
+} else {
+    Write-Host "  -> arkham-deckbuilder 前端依赖已存在，跳过" -ForegroundColor Green
+}
+Write-Host "  -> 依赖安装完成" -ForegroundColor Green
+
+# 调用 update-ip.ps1 完成 IP 设置 + 证书签发 + 编译
+Write-Host "[6/6] 设置 IP 地址并完成初始化..." -ForegroundColor Yellow
+& "$Root\scripts\update-ip.ps1" -Root $Root -AH $AH -AD $AD
+
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Green
+Write-Host "   首次安装完成！" -ForegroundColor Green
+Write-Host "========================================" -ForegroundColor Green
+Write-Host ""
+Write-Host "  以后每次开机只需运行 run.ps1 → 选 2 即可" -ForegroundColor Cyan
+Write-Host ""
+Read-Host "按回车返回主菜单"
+'@ | Set-Content "D:\ArkhamHorror\scripts\install.ps1" -Encoding UTF8
+Write-Host "完成" -ForegroundColor Green
+运行完告诉我结果。
+
+You said: 完成
+完成
+Copilot said: 好。现在写 `start-all.ps1`（相对路径版）。 ## 第 10 步：运行这条命令（创建新版 start-all.ps1） ```powershell @' param($Root, $AH,
+好。现在写 start-all.ps1（相对路径版）。
+
+第 10 步：运行这条命令（创建新版 start-all.ps1）
+PowerShell
+@'
+param($Root, $AH, $AD)
+
+Clear-Host
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "   ArkhamHorror 一键启动" -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host ""
+
+# 等待 Docker 就绪
+Write-Host "[1/5] 正在等待 Docker Desktop 就绪..." -ForegroundColor Yellow
+$ready = $false
+for ($i = 0; $i -lt 60; $i++) {
+    docker info 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0) { $ready = $true; break }
+    Start-Sleep -Seconds 2
+}
+if (-not $ready) {
+    Write-Host "  -> Docker Desktop 未就绪，请先手动启动 Docker Desktop！" -ForegroundColor Red
+    Read-Host "按回车退出"
+    exit 1
+}
+Write-Host "  -> Docker Desktop 已就绪" -ForegroundColor Green
+
+# 启动 Docker 容器
+Write-Host "[2/5] 正在启动 Docker 容器..." -ForegroundColor Yellow
+Push-Location $AH
+docker compose up -d
+Pop-Location
+Start-Sleep -Seconds 3
+Write-Host "  -> Docker 容器已启动" -ForegroundColor Green
+
+# 同步 tools 文件
+Write-Host "[3/5] 正在同步 tools 文件..." -ForegroundColor Yellow
+Copy-Item (Join-Path $AH "tools.html")       (Join-Path $AH "frontend\public\tools.html")       -Force
+Copy-Item (Join-Path $AH "tools-inject.js")  (Join-Path $AH "frontend\public\tools-inject.js")  -Force
+$indexPath = Join-Path $AH "frontend\index.html"
+$indexHtml = Get-Content $indexPath -Raw
+if ($indexHtml -notmatch 'tools-inject\.js') {
+    $indexHtml = $indexHtml -replace '</body>', "    <script src=""/tools-inject.js"" defer></script>`n</body>"
+    Set-Content $indexPath $indexHtml -Encoding UTF8
+    Write-Host "  -> index.html 已注入 tools-inject.js" -ForegroundColor Green
+} else {
+    Write-Host "  -> index.html 已包含 tools-inject.js" -ForegroundColor Green
+}
+Write-Host "  -> tools 文件已同步" -ForegroundColor Green
+
+# 检查并修复 Vite 配置
+Write-Host "[4/5] 正在检查 Vite 配置..." -ForegroundColor Yellow
+$vitePath = Join-Path $AH "frontend\vite.config.js"
+$viteConfig = Get-Content $vitePath -Raw
+$needFix = $false
+if ($viteConfig -match 'http://127\.0\.0\.1:3002') {
+    $viteConfig = $viteConfig -replace 'http://127\.0\.0\.1:3002', 'http://127.0.0.1:3000'
+    $needFix = $true
+}
+if ($viteConfig -match 'target:\s*"https?://arkham\.build"') {
+    $viteConfig = $viteConfig -replace 'target:\s*"https?://arkham\.build"', 'target: "https://api.arkham.build"'
+    $needFix = $true
+}
+if ($needFix) {
+    Set-Content $vitePath $viteConfig -Encoding UTF8
+    Write-Host "  -> Vite 配置已自动修复" -ForegroundColor Green
+} else {
+    Write-Host "  -> Vite 配置正确" -ForegroundColor Green
+}
+
+# 启动所有服务（按端口精准停旧进程）
+Write-Host "[5/5] 正在启动所有服务..." -ForegroundColor Yellow
+foreach ($port in @(8080, 3001, 3443, 3445)) {
+    $pid_ = (netstat -ano | Select-String ":$port\s.*LISTENING" | ForEach-Object { ($_ -split '\s+')[-1] } | Select-Object -First 1)
+    if ($pid_ -and $pid_ -ne "0") {
+        Stop-Process -Id $pid_ -Force -ErrorAction SilentlyContinue
+    }
+}
+Start-Sleep -Seconds 1
+
+$pidFile = Join-Path $Root "runtime\pids.json"
+New-Item -ItemType Directory -Path (Join-Path $Root "runtime") -Force | Out-Null
+
+$p1 = Start-Process "node" -ArgumentList (Join-Path $AH "https-proxy.js")  -WindowStyle Minimized -PassThru
+$p2 = Start-Process "node" -ArgumentList (Join-Path $AH "voice-server.js") -WindowStyle Minimized -PassThru
+$p3 = Start-Process "node" -ArgumentList (Join-Path $AD "local-share-api.cjs") -WindowStyle Minimized -PassThru
+$p4 = Start-Process powershell -ArgumentList "-Command `"Set-Location '$($AH)\frontend'; npx vite dev`"" -WindowStyle Minimized -PassThru
+
+@{ p1=$p1.Id; p2=$p2.Id; p3=$p3.Id; p4=$p4.Id } | ConvertTo-Json | Set-Content $pidFile -Encoding UTF8
+
+Start-Sleep -Seconds 5
+Write-Host "  -> 所有服务已启动" -ForegroundColor Green
+
+# 自动获取本机 IP 显示访问地址
+$ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notmatch '^127\.' -and $_.PrefixOrigin -ne 'WellKnown' } | Select-Object -First 1).IPAddress
+
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Green
+Write-Host "   全部完成！" -ForegroundColor Green
+Write-Host "========================================" -ForegroundColor Green
+Write-Host ""
+Write-Host "  ArkhamHorror 游戏:  https://${ip}:3443" -ForegroundColor Cyan
+Write-Host "  Arkham 组牌器:      https://${ip}:3445" -ForegroundColor Cyan
+Write-Host "  语音聊天:           wss://${ip}:3001" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "  （如果 IP 地址变了，请返回主菜单选 3）" -ForegroundColor DarkYellow
+Write-Host ""
+Read-Host "按回车返回主菜单"
+'@ | Set-Content "D:\ArkhamHorror\scripts\start-all.ps1" -Encoding UTF8
+Write-Host "完成" -ForegroundColor Green
+运行完告诉我结果。
+
+You said: 完成
+完成
+Copilot said: 好。现在写 `update-ip.ps1`（相对路径版）。 ## 第 11 步：运行这条命令（创建新版 update-ip.ps1） ```powershell @' param($Root, $AH,
+好。现在写 update-ip.ps1（相对路径版）。
+
+第 11 步：运行这条命令（创建新版 update-ip.ps1）
+PowerShell
+@'
+param($Root, $AH, $AD)
+
+Clear-Host
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "   更换 IP / 重新签发证书" -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host ""
+
+# 自动探测当前 IP 供参考
+$detectedIP = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notmatch '^127\.' -and $_.PrefixOrigin -ne 'WellKnown' } | Select-Object -First 1).IPAddress
+Write-Host "  检测到当前本机 IP：$detectedIP" -ForegroundColor DarkYellow
+Write-Host "  （直接回车使用上面的 IP，或手动输入新 IP）" -ForegroundColor DarkYellow
+Write-Host ""
+$inputIP = Read-Host "请输入 IP 地址"
+if ([string]::IsNullOrWhiteSpace($inputIP)) { $ip = $detectedIP } else { $ip = $inputIP.Trim() }
+
+Write-Host ""
+Write-Host "  IP 将设置为：$ip" -ForegroundColor Cyan
+Write-Host ""
+
+# 停止所有相关进程
+Write-Host "[1/8] 正在停止旧服务..." -ForegroundColor Yellow
+$pidFile = Join-Path $Root "runtime\pids.json"
+if (Test-Path $pidFile) {
+    $pids = Get-Content $pidFile | ConvertFrom-Json
+    foreach ($id in @($pids.p1, $pids.p2, $pids.p3, $pids.p4)) {
+        if ($id) { Stop-Process -Id $id -Force -ErrorAction SilentlyContinue }
+    }
+    Remove-Item $pidFile -Force
+}
+foreach ($port in @(8080, 3001, 3443, 3445)) {
+    $pid_ = (netstat -ano | Select-String ":$port\s.*LISTENING" | ForEach-Object { ($_ -split '\s+')[-1] } | Select-Object -First 1)
+    if ($pid_ -and $pid_ -ne "0") { Stop-Process -Id $pid_ -Force -ErrorAction SilentlyContinue }
+}
+Start-Sleep -Seconds 2
+Write-Host "  -> 旧服务已停止" -ForegroundColor Green
+
+# 生成新 SSL 证书
+Write-Host "[2/8] 正在生成新的 SSL 证书..." -ForegroundColor Yellow
+Remove-Item (Join-Path $AH "server.pem")     -ErrorAction SilentlyContinue -Force
+Remove-Item (Join-Path $AH "server-key.pem") -ErrorAction SilentlyContinue -Force
+Push-Location $AH
+.\mkcert.exe $ip
+Pop-Location
+$pemSrc    = Join-Path $AH "$ip.pem"
+$keySrc    = Join-Path $AH "$ip-key.pem"
+$pemDst    = Join-Path $AH "server.pem"
+$keyDst    = Join-Path $AH "server-key.pem"
+if (Test-Path $pemSrc) { Rename-Item $pemSrc $pemDst -Force }
+if (Test-Path $keySrc) { Rename-Item $keySrc $keyDst -Force }
+Write-Host "  -> 证书已更新" -ForegroundColor Green
+
+# 更新 .env 配置文件
+Write-Host "[3/8] 正在更新配置文件..." -ForegroundColor Yellow
+$timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+$deckEnv = @(
+    "# 本地私人 arkham.build 配置",
+    "# 自动生成于 $timestamp",
+    "# IP: $ip",
+    "",
+    "VITE_API_LEGACY_URL=https://${ip}:3445",
+    "VITE_CARD_IMAGE_URL=https://${ip}:3445/card-images",
+    "VITE_PAGE_NAME=arkham.build (本地)",
+    "VITE_ARKHAMDB_BASE_URL=https://arkhamdb.com",
+    "VITE_API_URL=https://${ip}:3445",
+    "VITE_SHOW_PREVIEW_BANNER=false"
+)
+$deckEnv | Set-Content (Join-Path $AD "frontend\.env") -Encoding UTF8
+Set-Content (Join-Path $AH "frontend\.env") "VITE_ARKHAM_BUILD_API_URL=https://${ip}:3445" -Encoding UTF8
+Write-Host "  -> 配置文件已更新" -ForegroundColor Green
+
+# 修复 Vite 配置
+Write-Host "[4/8] 正在检查 Vite 配置..." -ForegroundColor Yellow
+$vitePath = Join-Path $AH "frontend\vite.config.js"
+$viteConfig = Get-Content $vitePath -Raw
+$needFix = $false
+if ($viteConfig -match 'http://127\.0\.0\.1:3002') {
+    $viteConfig = $viteConfig -replace 'http://127\.0\.0\.1:3002', 'http://127.0.0.1:3000'
+    $needFix = $true
+}
+if ($viteConfig -match 'target:\s*"https?://arkham\.build"') {
+    $viteConfig = $viteConfig -replace 'target:\s*"https?://arkham\.build"', 'target: "https://api.arkham.build"'
+    $needFix = $true
+}
+if ($needFix) {
+    Set-Content $vitePath $viteConfig -Encoding UTF8
+    Write-Host "  -> Vite 配置已自动修复" -ForegroundColor Green
+} else {
+    Write-Host "  -> Vite 配置正确" -ForegroundColor Green
+}
+
+# 同步 tools 文件
+Write-Host "[5/8] 正在同步 tools 文件..." -ForegroundColor Yellow
+Copy-Item (Join-Path $AH "tools.html")      (Join-Path $AH "frontend\public\tools.html")      -Force
+Copy-Item (Join-Path $AH "tools-inject.js") (Join-Path $AH "frontend\public\tools-inject.js") -Force
+$indexPath = Join-Path $AH "frontend\index.html"
+$indexHtml = Get-Content $indexPath -Raw
+if ($indexHtml -notmatch 'tools-inject\.js') {
+    $indexHtml = $indexHtml -replace '</body>', "    <script src=""/tools-inject.js"" defer></script>`n</body>"
+    Set-Content $indexPath $indexHtml -Encoding UTF8
+    Write-Host "  -> index.html 已注入 tools-inject.js" -ForegroundColor Green
+} else {
+    Write-Host "  -> index.html 已包含 tools-inject.js" -ForegroundColor Green
+}
+Write-Host "  -> tools 文件已同步" -ForegroundColor Green
+
+# 重新编译 deckbuilder 前端
+Write-Host "[6/8] 正在重新编译 arkham-deckbuilder 前端..." -ForegroundColor Yellow
+Push-Location (Join-Path $AD "frontend")
+npx vite build
+$buildResult = $LASTEXITCODE
+Pop-Location
+if ($buildResult -ne 0) {
+    Write-Host "  -> 编译失败！请检查错误信息" -ForegroundColor Red
+    Read-Host "按回车退出"
+    exit 1
+}
+Write-Host "  -> 编译完成" -ForegroundColor Green
+
+# 启动 Docker 容器
+Write-Host "[7/8] 正在启动 Docker 容器..." -ForegroundColor Yellow
+Push-Location $AH
+docker compose up -d
+Pop-Location
+Start-Sleep -Seconds 3
+Write-Host "  -> Docker 容器已启动" -ForegroundColor Green
+
+# 启动所有服务
+Write-Host "[8/8] 正在启动所有服务..." -ForegroundColor Yellow
+New-Item -ItemType Directory -Path (Join-Path $Root "runtime") -Force | Out-Null
+$p1 = Start-Process "node" -ArgumentList (Join-Path $AH "https-proxy.js")      -WindowStyle Minimized -PassThru
+$p2 = Start-Process "node" -ArgumentList (Join-Path $AH "voice-server.js")     -WindowStyle Minimized -PassThru
+$p3 = Start-Process "node" -ArgumentList (Join-Path $AD "local-share-api.cjs") -WindowStyle Minimized -PassThru
+$p4 = Start-Process powershell -ArgumentList "-Command `"Set-Location '$($AH)\frontend'; npx vite dev`"" -WindowStyle Minimized -PassThru
+@{ p1=$p1.Id; p2=$p2.Id; p3=$p3.Id; p4=$p4.Id } | ConvertTo-Json | Set-Content (Join-Path $Root "runtime\pids.json") -Encoding UTF8
+Start-Sleep -Seconds 5
+Write-Host "  -> 所有服务已启动" -ForegroundColor Green
+
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Green
+Write-Host "   全部完成！IP 已更新为 $ip" -ForegroundColor Green
+Write-Host "========================================" -ForegroundColor Green
+Write-Host ""
+Write-Host "  ArkhamHorror 游戏:  https://${ip}:3443" -ForegroundColor Cyan
+Write-Host "  Arkham 组牌器:      https://${ip}:3445" -ForegroundColor Cyan
+Write-Host "  语音聊天:           wss://${ip}:3001" -ForegroundColor Cyan
+Write-Host ""
+Read-Host "按回车返回主菜单"
+'@ | Set-Content "D:\ArkhamHorror\scripts\update-ip.ps1" -Encoding UTF8
+Write-Host "完成" -ForegroundColor Green
+运行完告诉我结果。
+
+You said: 完成
+完成
+Copilot said: 好。现在写 `download-images.ps1`（离线图包下载菜单）。 ## 第 12 步：运行这条命令（创建 download-images.ps1） ```powershell @' param($AH) Clear-Host Write-Host "========================================"
+好。现在写 download-images.ps1（离线图包下载菜单）。
+
+第 12 步：运行这条命令（创建 download-images.ps1）
+PowerShell
+@'
+param($AH)
+
+Clear-Host
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "   下载离线图包" -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "  说明：图包下载后游戏图片不再依赖网络" -ForegroundColor DarkYellow
+Write-Host "  图包较大，下载时间取决于你的网速" -ForegroundColor DarkYellow
+Write-Host ""
+Write-Host "  [1] 仅英文图包         （约 1.3 GB）" -ForegroundColor White
+Write-Host "  [2] 英文 + 中文        （约 1.5 GB）" -ForegroundColor White
+Write-Host "  [3] 英文 + 日文        （约 1.5 GB）" -ForegroundColor White
+Write-Host "  [4] 英文 + 韩文        （约 1.5 GB）" -ForegroundColor White
+Write-Host "  [5] 英文 + 法文        （约 1.5 GB）" -ForegroundColor White
+Write-Host "  [6] 英文 + 西班牙文    （约 1.5 GB）" -ForegroundColor White
+Write-Host "  [7] 全部语言           （约 2.9 GB）" -ForegroundColor White
+Write-Host "  [8] 返回主菜单" -ForegroundColor DarkGray
+Write-Host ""
+$choice = Read-Host "请输入数字选择"
+
+$langMap = @{
+    "1" = "en"
+    "2" = "en+zh"
+    "3" = "en+ja"
+    "4" = "en+ko"
+    "5" = "en+fr"
+    "6" = "en+es"
+    "7" = "all"
+    "8" = $null
+}
+
+if ($choice -eq "8" -or -not $langMap.ContainsKey($choice)) {
+    Write-Host "已取消，返回主菜单" -ForegroundColor DarkGray
+    Start-Sleep -Seconds 1
+    return
+}
+
+$lang = $langMap[$choice]
+
+Write-Host ""
+Write-Host "  开始下载：$lang" -ForegroundColor Cyan
+Write-Host "  （这可能需要很长时间，请耐心等待）" -ForegroundColor DarkYellow
+Write-Host ""
+
+Push-Location $AH
+docker compose --profile fetch-images run --rm fetch-images $lang
+$result = $LASTEXITCODE
+Pop-Location
+
+if ($result -ne 0) {
+    Write-Host ""
+    Write-Host "  下载失败！请检查网络连接后重试" -ForegroundColor Red
+    Read-Host "按回车返回主菜单"
+    return
+}
+
+Write-Host ""
+Write-Host "  下载完成！正在重启 web 容器..." -ForegroundColor Green
+Push-Location $AH
+docker compose restart web
+Pop-Location
+
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Green
+Write-Host "   图包下载完成！" -ForegroundColor Green
+Write-Host "========================================" -ForegroundColor Green
+Write-Host ""
+Write-Host "  图片现在从本地加载，无需联网" -ForegroundColor Cyan
+Write-Host ""
+Read-Host "按回车返回主菜单"
+'@ | Set-Content "D:\ArkhamHorror\scripts\download-images.ps1" -Encoding UTF8
+Write-Host "完成" -ForegroundColor Green
+运行完告诉我结果。
+
+You said: 完成
+完成
+Copilot said: 好。现在写 `repair-docker.ps1`（容器误删后修复用）。 ## 第 13 步：运行这条命令（创建 repair-docker.ps1） ```powershell @' param($AH) Clear-Host Write-Host "========================================"
+好。现在写 repair-docker.ps1（容器误删后修复用）。
+
+第 13 步：运行这条命令（创建 repair-docker.ps1）
+PowerShell
+@'
+param($AH)
+
+Clear-Host
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "   修复 Docker 容器" -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "  适用场景：" -ForegroundColor DarkYellow
+Write-Host "  - 容器被误删" -ForegroundColor DarkYellow
+Write-Host "  - 镜像被误删" -ForegroundColor DarkYellow
+Write-Host "  - docker compose up 报错" -ForegroundColor DarkYellow
+Write-Host ""
+Write-Host "  [1] 重建容器（容器被删，但镜像还在）" -ForegroundColor White
+Write-Host "  [2] 重新拉取镜像并重建（镜像也被删）" -ForegroundColor White
+Write-Host "  [3] 查看数据库是否安全（volume 是否存在）" -ForegroundColor White
+Write-Host "  [4] 备份数据库（防止意外丢档）" -ForegroundColor White
+Write-Host "  [5] 返回主菜单" -ForegroundColor DarkGray
+Write-Host ""
+$choice = Read-Host "请输入数字选择"
+
+switch ($choice) {
+
+    "1" {
+        Write-Host ""
+        Write-Host "  正在重建容器..." -ForegroundColor Yellow
+        Push-Location $AH
+        docker compose up -d
+        $result = $LASTEXITCODE
+        Pop-Location
+        if ($result -eq 0) {
+            Write-Host "  -> 容器已重建并启动" -ForegroundColor Green
+        } else {
+            Write-Host "  -> 重建失败，请尝试选项 2（重新拉取镜像）" -ForegroundColor Red
+        }
+        Write-Host ""
+        Read-Host "按回车返回主菜单"
+    }
+
+    "2" {
+        Write-Host ""
+        Write-Host "  正在重新拉取镜像（需要网络，可能较慢）..." -ForegroundColor Yellow
+        Push-Location $AH
+        docker compose pull
+        docker compose up -d
+        $result = $LASTEXITCODE
+        Pop-Location
+        if ($result -eq 0) {
+            Write-Host "  -> 镜像已重新拉取，容器已启动" -ForegroundColor Green
+        } else {
+            Write-Host "  -> 失败！请检查网络连接和 docker-compose.yml" -ForegroundColor Red
+        }
+        Write-Host ""
+        Read-Host "按回车返回主菜单"
+    }
+
+    "3" {
+        Write-Host ""
+        Write-Host "  正在检查数据库 volume..." -ForegroundColor Yellow
+        $vol = docker volume ls | Select-String "pgdata"
+        if ($vol) {
+            Write-Host "  -> 数据库 volume 存在，游戏存档安全！" -ForegroundColor Green
+            Write-Host "     $vol" -ForegroundColor DarkGray
+        } else {
+            Write-Host "  -> 警告：未找到 pgdata volume！" -ForegroundColor Red
+            Write-Host "     数据库数据可能已丢失" -ForegroundColor Red
+            Write-Host "     如果你有备份，可以用选项 2 重建后手动恢复" -ForegroundColor DarkYellow
+        }
+        Write-Host ""
+        Read-Host "按回车返回主菜单"
+    }
+
+    "4" {
+        Write-Host ""
+        $backupDir = Join-Path $AH "backup"
+        New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
+        $backupFile = Join-Path $backupDir ("db-backup-" + (Get-Date -Format "yyyyMMdd-HHmmss") + ".sql")
+        Write-Host "  正在备份数据库..." -ForegroundColor Yellow
+        Write-Host "  备份文件：$backupFile" -ForegroundColor DarkGray
+        docker exec -t arkhamhorror-db-1 pg_dump -U arkham_pg_user arkham-horror-backend | Set-Content $backupFile -Encoding UTF8
+        if (Test-Path $backupFile) {
+            $size = [math]::Round((Get-Item $backupFile).Length / 1KB, 1)
+            Write-Host "  -> 备份完成！文件大小：${size} KB" -ForegroundColor Green
+            Write-Host "     位置：$backupFile" -ForegroundColor Cyan
+        } else {
+            Write-Host "  -> 备份失败！请确认容器正在运行" -ForegroundColor Red
+        }
+        Write-Host ""
+        Read-Host "按回车返回主菜单"
+    }
+
+    default {
+        Write-Host "已取消，返回主菜单" -ForegroundColor DarkGray
+        Start-Sleep -Seconds 1
+    }
+}
+'@ | Set-Content "D:\ArkhamHorror\scripts\repair-docker.ps1" -Encoding UTF8
+Write-Host "完成" -ForegroundColor Green
+运行完告诉我结果。
+
+You said: 完成
+完成
+Copilot said: 好。现在写最后一个脚本文件：`README-FIRST.txt`（朋友收到安装包后第一眼看的说明）。 ## 第 14 步：运行这条命令（创建 README-FIRST.txt） ```powershell @' ================================================================ ArkhamHorror
+好。现在写最后一个脚本文件：README-FIRST.txt（朋友收到安装包后第一眼看的说明）。
+
+第 14 步：运行这条命令（创建 README-FIRST.txt）
+PowerShell
+@'
+================================================================
+  ArkhamHorror 本地局域网版 - 安装说明
+  （第一次看这个文件，5分钟装好）
+================================================================
+
+【你收到的这个包里有什么】
+
+  ArkhamHorror\        ← 游戏主程序
+  arkham-deckbuilder\  ← 组牌器（本地版 arkham.build）
+  scripts\             ← 所有脚本
+  run.ps1              ← 总入口，装好后每次都从这里进
+  README-FIRST.txt     ← 就是这个文件
+
+
+【第一步：安装前置软件（只需装一次）】
+
+  1. 安装 Docker Desktop
+     下载地址：https://www.docker.com/products/docker-desktop/
+     安装完后启动它，看到界面就行
+
+  2. 安装 Node.js
+     下载地址：https://nodejs.org/
+     选 LTS 版本，一路下一步安装
+
+
+【第二步：把这个包解压到任意位置】
+
+  例如解压到：
+    C:\Games\ArkhamPack\
+    E:\ArkhamPack\
+    D:\ArkhamPack\
+  放哪个盘都可以，路径里不要有中文
+
+
+【第三步：首次安装（只做一次）】
+
+  1. 确保 Docker Desktop 已经启动（看到鲸鱼图标）
+  2. 找到解压后的 run.ps1
+  3. 右键 run.ps1 → 选"使用 PowerShell 运行"
+     （如果提示"无法运行脚本"，见下方常见问题）
+  4. 出现菜单后选 1（首次安装）
+  5. 脚本会自动探测你的 IP，直接回车确认即可
+  6. 等待安装完成（首次较慢，需要下载 Docker 镜像）
+
+
+【以后每次开机】
+
+  1. 启动 Docker Desktop
+  2. 右键 run.ps1 → 使用 PowerShell 运行
+  3. 选 2（一键启动）
+  4. 打开浏览器访问：
+       游戏：  https://你的IP:3443
+       组牌器：https://你的IP:3445
+
+  手机/平板：连同一个 WiFi，用电脑 IP 访问即可
+
+
+【IP 地址变了怎么办】
+
+  run.ps1 → 选 3（更换IP）→ 直接回车用自动探测的 IP
+
+
+【想要离线图包（不依赖网络加载图片）】
+
+  run.ps1 → 选 4（下载离线图包）→ 选语言
+  推荐选：英文+中文（约 1.5 GB）
+
+
+【游戏存档误删了怎么办】
+
+  run.ps1 → 选 5（修复 Docker）→ 选 1 重建容器
+  只要没删 Docker volume，存档就还在
+
+
+【常见问题】
+
+  Q: 右键 run.ps1 提示"无法运行脚本"？
+  A: 打开 PowerShell（管理员），运行：
+       Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+     输入 Y 回车，之后就可以运行了
+
+  Q: 浏览器显示"不安全/证书错误"？
+  A: 点"高级"→"继续前往"，这是正常的（自签名证书）
+
+  Q: 手机访问显示不安全怎么办？
+  A: 手机浏览器同样点"继续访问"即可
+
+  Q: Docker Desktop 没启动？
+  A: 先打开 Docker Desktop，等鲸鱼图标出现后再运行 run.ps1
+
+  Q: 安装很慢？
+  A: 首次安装需要下载 Docker 镜像（约几百MB），正常现象
+
+  Q: 端口被占用报错？
+  A: run.ps1 → 选 2 重新启动，脚本会自动清理占用端口
+
+
+================================================================
+  遇到问题截图发给发你包的人就行！
+================================================================
+'@ | Set-Content "D:\ArkhamHorror\README-FIRST.txt" -Encoding UTF8
+Write-Host "完成" -ForegroundColor Green
+运行完告诉我结果。
+
+You said: 完成
+完成
+Copilot said: 好。现在测试一下你自己的 `run.ps1` 能不能正常打开菜单。 ## 第 15 步：运行这条命令（测试 run.ps1） 在
+好。现在测试一下你自己的 run.ps1 能不能正常打开菜单。
+
+第 15 步：运行这条命令（测试 run.ps1）
+在 PowerShell 里运行：
+
+PowerShell
+powershell -ExecutionPolicy Bypass -File "D:\ArkhamHorror\run.ps1"
+应该会弹出一个新窗口，显示这样的菜单：
+
+Code
+========================================
+   ArkhamHorror 一键包
+========================================
+
+  [1] 首次安装（第一次用必选）
+  [2] 一键启动服务器
+  [3] 更换 IP / 重新签发证书
+  [4] 下载离线图包（可选，约1-3GB）
+  [5] 修复 Docker 容器（误删后用）
+  [6] 退出
+出现菜单后选 6 退出，然后告诉我：
+
+菜单有没有正常显示
+有没有报错（如果有把报错贴给我）
+You said: 正常显示没有报错
+正常显示没有报错
+Copilot said: 完美。现在做最后一步：把打包时需要排除的大文件/缓存目录确认一下，然后告诉你怎么打包发给朋友。 ## 第 16 步：运行这条命令（确认要排除的目录大小） ```powershell $dirs = @(
+完美。现在做最后一步：把打包时需要排除的大文件/缓存目录确认一下，然后告诉你怎么打包发给朋友。
+
+第 16 步：运行这条命令（确认要排除的目录大小）
+PowerShell
+$dirs = @(
+    "D:\ArkhamHorror\frontend\public\img",
+    "D:\ArkhamHorror\frontend\node_modules",
+    "D:\ArkhamHorror\frontend\dist",
+    "D:\arkham-deckbuilder\node_modules",
+    "D:\arkham-deckbuilder\frontend\node_modules",
+    "D:\arkham-deckbuilder\frontend\dist",
+    "D:\ArkhamHorror\backup"
+)
+foreach ($d in $dirs) {
+    if (Test-Path $d) {
+        $size = [math]::Round((Get-ChildItem $d -Recurse -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum / 1GB, 2)
+        Write-Host "$d  →  ${size} GB" -ForegroundColor Cyan
+    } else {
+        Write-Host "$d  →  不存在" -ForegroundColor DarkGray
+    }
+}
+把输出贴给我。
+
+You said: D:\ArkhamHorror\frontend\public\img → 2.62 GB D:\ArkhamHorror\frontend\node_modules
+D:\ArkhamHorror\frontend\public\img  →  2.62 GB
+D:\ArkhamHorror\frontend\node_modules  →  0.28 GB
+D:\ArkhamHorror\frontend\dist  →  2.8 GB
+D:\arkham-deckbuilder\node_modules  →  0.42 GB
+D:\arkham-deckbuilder\frontend\node_modules  →  0.01 GB
+D:\arkham-deckbuilder\frontend\dist  →  0.03 GB
+D:\ArkhamHorror\backup  →  不存在
+Copilot said: 很好。现在我完全清楚了。打包时需要排除的内容： | 目录 | 大小 | 原因 | |------|------|------| |
+很好。现在我完全清楚了。打包时需要排除的内容：
+
+目录	大小	原因
+frontend\public\img	2.62 GB	图包，让朋友自己下载
+frontend\node_modules	0.28 GB	依赖，install.ps1 会自动安装
+frontend\dist	2.80 GB	构建缓存，不需要
+arkham-deckbuilder\node_modules	0.42 GB	依赖，install.ps1 会自动安装
+arkham-deckbuilder\frontend\node_modules	0.01 GB	依赖，install.ps1 会自动安装
+排除这些之后包会从 8GB+ 缩小到约 1GB 以内（主要是 music 目录 0.06GB + 代码文件）。
+
+第 17 步：运行这条命令（创建打包脚本 make-pack.ps1）
+PowerShell
+@'
+# ================================================
+#  打包脚本 - 生成可分发的 ArkhamPack
+# ================================================
+$src1  = "D:\ArkhamHorror"
+$src2  = "D:\arkham-deckbuilder"
+$dest  = "D:\ArkhamPack"
+$dest1 = "$dest\ArkhamHorror"
+$dest2 = "$dest\arkham-deckbuilder"
+
+# 排除的目录（相对于各自根目录）
+$exclude1 = @(
+    "frontend\public\img",
+    "frontend\node_modules",
+    "frontend\dist",
+    "backup",
+    "runtime"
+)
+$exclude2 = @(
+    "node_modules",
+    "frontend\node_modules",
+    "frontend\dist"
+)
+
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "   ArkhamPack 打包工具" -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "  输出目录：$dest" -ForegroundColor DarkYellow
+Write-Host "  排除：img(2.62GB) / node_modules / dist" -ForegroundColor DarkYellow
+Write-Host ""
+
+# 清理旧的输出目录
+if (Test-Path $dest) {
+    Write-Host "  正在清理旧的 ArkhamPack 目录..." -ForegroundColor Yellow
+    Remove-Item $dest -Recurse -Force
+}
+New-Item -ItemType Directory -Path $dest1 -Force | Out-Null
+New-Item -ItemType Directory -Path $dest2 -Force | Out-Null
+
+# 复制 ArkhamHorror（排除大目录）
+Write-Host "  [1/4] 正在复制 ArkhamHorror..." -ForegroundColor Yellow
+$excludePaths1 = $exclude1 | ForEach-Object { Join-Path $src1 $_ }
+Get-ChildItem $src1 -Recurse | Where-Object {
+    $itemPath = $_.FullName
+    $skip = $false
+    foreach ($ex in $excludePaths1) {
+        if ($itemPath -eq $ex -or $itemPath.StartsWith($ex + "\")) {
+            $skip = $true; break
+        }
+    }
+    -not $skip
+} | ForEach-Object {
+    $relative = $_.FullName.Substring($src1.Length + 1)
+    $target   = Join-Path $dest1 $relative
+    if ($_.PSIsContainer) {
+        New-Item -ItemType Directory -Path $target -Force | Out-Null
+    } else {
+        $targetDir = Split-Path $target -Parent
+        if (-not (Test-Path $targetDir)) {
+            New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+        }
+        Copy-Item $_.FullName $target -Force
+    }
+}
+Write-Host "  -> ArkhamHorror 复制完成" -ForegroundColor Green
+
+# 复制 arkham-deckbuilder（排除大目录）
+Write-Host "  [2/4] 正在复制 arkham-deckbuilder..." -ForegroundColor Yellow
+$excludePaths2 = $exclude2 | ForEach-Object { Join-Path $src2 $_ }
+Get-ChildItem $src2 -Recurse | Where-Object {
+    $itemPath = $_.FullName
+    $skip = $false
+    foreach ($ex in $excludePaths2) {
+        if ($itemPath -eq $ex -or $itemPath.StartsWith($ex + "\")) {
+            $skip = $true; break
+        }
+    }
+    -not $skip
+} | ForEach-Object {
+    $relative = $_.FullName.Substring($src2.Length + 1)
+    $target   = Join-Path $dest2 $relative
+    if ($_.PSIsContainer) {
+        New-Item -ItemType Directory -Path $target -Force | Out-Null
+    } else {
+        $targetDir = Split-Path $target -Parent
+        if (-not (Test-Path $targetDir)) {
+            New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+        }
+        Copy-Item $_.FullName $target -Force
+    }
+}
+Write-Host "  -> arkham-deckbuilder 复制完成" -ForegroundColor Green
+
+# 复制 run.ps1 和 README-FIRST.txt 到根目录
+Write-Host "  [3/4] 正在复制入口文件..." -ForegroundColor Yellow
+Copy-Item "$src1\run.ps1"          "$dest\run.ps1"          -Force
+Copy-Item "$src1\README-FIRST.txt" "$dest\README-FIRST.txt" -Force
+Write-Host "  -> 入口文件复制完成" -ForegroundColor Green
+
+# 建立空的 img 目录（让 docker-compose 挂载不报错）
+Write-Host "  [4/4] 正在建立空 img 目录..." -ForegroundColor Yellow
+New-Item -ItemType Directory -Path "$dest1\frontend\public\img" -Force | Out-Null
+Write-Host "  -> 完成" -ForegroundColor Green
+
+# 统计打包后大小
+$packSize = [math]::Round((Get-ChildItem $dest -Recurse -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum / 1GB, 2)
+
+Write-Host ""
+Write-Host "========================================" -ForegroundColor Green
+Write-Host "   打包完成！" -ForegroundColor Green
+Write-Host "========================================" -ForegroundColor Green
+Write-Host ""
+Write-Host "  输出目录：$dest" -ForegroundColor Cyan
+Write-Host "  打包大小：${packSize} GB" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "  下一步：把 D:\ArkhamPack 整个目录压缩成 zip 发给朋友" -ForegroundColor DarkYellow
+Write-Host "  朋友解压后右键 run.ps1 → 使用 PowerShell 运行 → 选 1 首次安装" -ForegroundColor DarkYellow
+Write-Host ""
+Read-Host "按回车退出"
+'@ | Set-Content "D:\ArkhamHorror\make-pack.ps1" -Encoding UTF8
+Write-Host "完成" -ForegroundColor Green
+运行完告诉我结果。
+
+You said: 完成
+完成
+Copilot said: 好。现在运行打包脚本，把你的项目打包成可分发的 ArkhamPack。 ## 第 18 步：运行打包脚本 ```powershell powershell -ExecutionPolicy Bypass
+好。现在运行打包脚本，把你的项目打包成可分发的 ArkhamPack。
+
+第 18 步：运行打包脚本
+PowerShell
+powershell -ExecutionPolicy Bypass -File "D:\ArkhamHorror\make-pack.ps1"
+这个脚本会把所有文件复制到 D:\ArkhamPack，排除大文件目录，需要几分钟时间。
+
+等它显示"打包完成！"后把输出结果贴给我（特别是"打包大小"那一行）。
+
+You said: 输出目录：D:\ArkhamPack 打包大小：0.29 GB 下一步：把 D:\ArkhamPack
+输出目录：D:\ArkhamPack
+  打包大小：0.29 GB
+
+  下一步：把 D:\ArkhamPack 整个目录压缩成 zip 发给朋友
+  朋友解压后右键 run.ps1 → 使用 PowerShell 运行 → 选 1 首次安装
+
+按回车退出:
+Copilot said: 完美。0.29 GB，非常干净。 现在验证一下打包结果的目录结构是否正确。 ## 第 19 步：运行这条命令（验证打包结果） ```powershell Write-Host "=== ArkhamPack
+完美。0.29 GB，非常干净。
+
+现在验证一下打包结果的目录结构是否正确。
+
+第 19 步：运行这条命令（验证打包结果）
+PowerShell
+Write-Host "=== ArkhamPack 根目录 ===" -ForegroundColor Cyan
+Get-ChildItem "D:\ArkhamPack" | Select-Object Name
+
+Write-Host ""
+Write-Host "=== ArkhamHorror 目录 ===" -ForegroundColor Cyan
+Get-ChildItem "D:\ArkhamPack\ArkhamHorror" | Select-Object Name
+
+Write-Host ""
+Write-Host "=== scripts 目录 ===" -ForegroundColor Cyan
+Get-ChildItem "D:\ArkhamPack\ArkhamHorror\scripts" | Select-Object Name
+
+Write-Host ""
+Write-Host "=== 关键文件是否存在 ===" -ForegroundColor Cyan
+@(
+    "D:\ArkhamPack\run.ps1",
+    "D:\ArkhamPack\README-FIRST.txt",
+    "D:\ArkhamPack\ArkhamHorror\mkcert.exe",
+    "D:\ArkhamPack\ArkhamHorror\docker-compose.yml",
+    "D:\ArkhamPack\ArkhamHorror\https-proxy.js",
+    "D:\ArkhamPack\ArkhamHorror\voice-server.js",
+    "D:\ArkhamPack\ArkhamHorror\scripts\install.ps1",
+    "D:\ArkhamPack\ArkhamHorror\scripts\start-all.ps1",
+    "D:\ArkhamPack\ArkhamHorror\scripts\update-ip.ps1",
+    "D:\ArkhamPack\ArkhamHorror\scripts\download-images.ps1",
+    "D:\ArkhamPack\ArkhamHorror\scripts\repair-docker.ps1",
+    "D:\ArkhamPack\arkham-deckbuilder\local-share-api.cjs"
+) | ForEach-Object {
+    if (Test-Path $_) {
+        Write-Host "  OK  $_" -ForegroundColor Green
+    } else {
+        Write-Host "  缺失 $_" -ForegroundColor Red
+    }
+}
+把输出全部贴给我。
+
+You said: PS C:\Users\MECHREV> Write-Host "=== ArkhamPack 根目录 ==="
+PS C:\Users\MECHREV> Write-Host "=== ArkhamPack 根目录 ===" -ForegroundColor Cyan
+=== ArkhamPack 根目录 ===
+PS C:\Users\MECHREV> Get-ChildItem "D:\ArkhamPack" | Select-Object Name
+
+Name
+----
+arkham-deckbuilder
+ArkhamHorror
+README-FIRST.txt
+run.ps1
+
+
+PS C:\Users\MECHREV>
+PS C:\Users\MECHREV> Write-Host ""
+
+PS C:\Users\MECHREV> Write-Host "=== ArkhamHorror 目录 ===" -ForegroundColor Cyan
+=== ArkhamHorror 目录 ===
+PS C:\Users\MECHREV> Get-ChildItem "D:\ArkhamPack\ArkhamHorror" | Select-Object Name
+
+Name
+----
+.github
+.kamal
+backend
+config
+docs
+frontend
+infra
+migrations
+node_modules
+scripts
+.dir-locals.el
+.dockerignore
+.gitattributes
+.gitignore
+cert.der
+cert.pem
+cert.pfx
+check.sh
+crontasks
+docker-compose.yml
+Dockerfile
+flake.lock
+flake.nix
+https-proxy.js
+index-override.html
+install.sh
+key.pem
+local.nginxconf
+make-pack.ps1
+Makefile
+mkcert.exe
+package-lock.json
+package.json
+prod.nginxconf
+README-FIRST.txt
+README.md
+run.ps1
+server-key.pem
+server.pem
+setup.sql
+shell.nix
+start-all.ps1
+start.sh
+tools-inject.js
+tools.html
+update-cert.ps1
+update-ip.ps1
+voice-server.js
+web-entrypoint.sh
+使用教程.txt
+
+
+PS C:\Users\MECHREV>
+PS C:\Users\MECHREV> Write-Host ""
+
+PS C:\Users\MECHREV> Write-Host "=== scripts 目录 ===" -ForegroundColor Cyan
+=== scripts 目录 ===
+PS C:\Users\MECHREV> Get-ChildItem "D:\ArkhamPack\ArkhamHorror\scripts" | Select-Object Name
+
+Name
+----
+check-manifest.sh
+download-images.ps1
+fetch-assets.sh
+generate-manifest.cjs
+install.ps1
+repair-docker.ps1
+start-all.ps1
+sync-and-manifest.sh
+update-ip.ps1
+
+
+PS C:\Users\MECHREV>
+PS C:\Users\MECHREV> Write-Host ""
+
+PS C:\Users\MECHREV> Write-Host "=== 关键文件是否存在 ===" -ForegroundColor Cyan
+=== 关键文件是否存在 ===
+PS C:\Users\MECHREV> @(
+>>     "D:\ArkhamPack\run.ps1",
+>>     "D:\ArkhamPack\README-FIRST.txt",
+>>     "D:\ArkhamPack\ArkhamHorror\mkcert.exe",
+>>     "D:\ArkhamPack\ArkhamHorror\docker-compose.yml",
+>>     "D:\ArkhamPack\ArkhamHorror\https-proxy.js",
+>>     "D:\ArkhamPack\ArkhamHorror\voice-server.js",
+>>     "D:\ArkhamPack\ArkhamHorror\scripts\install.ps1",
+>>     "D:\ArkhamPack\ArkhamHorror\scripts\start-all.ps1",
+>>     "D:\ArkhamPack\ArkhamHorror\scripts\update-ip.ps1",
+>>     "D:\ArkhamPack\ArkhamHorror\scripts\download-images.ps1",
+>>     "D:\ArkhamPack\ArkhamHorror\scripts\repair-docker.ps1",
+>>     "D:\ArkhamPack\arkham-deckbuilder\local-share-api.cjs"
+>> ) | ForEach-Object {
+>>     if (Test-Path $_) {
+>>         Write-Host "  OK  $_" -ForegroundColor Green
+>>     } else {
+>>         Write-Host "  缺失 $_" -ForegroundColor Red
+>>     }
+>> }
+  OK  D:\ArkhamPack\run.ps1
+  OK  D:\ArkhamPack\README-FIRST.txt
+  OK  D:\ArkhamPack\ArkhamHorror\mkcert.exe
+  OK  D:\ArkhamPack\ArkhamHorror\docker-compose.yml
+  OK  D:\ArkhamPack\ArkhamHorror\https-proxy.js
+  OK  D:\ArkhamPack\ArkhamHorror\voice-server.js
+  OK  D:\ArkhamPack\ArkhamHorror\scripts\install.ps1
+  OK  D:\ArkhamPack\ArkhamHorror\scripts\start-all.ps1
+  OK  D:\ArkhamPack\ArkhamHorror\scripts\update-ip.ps1
+  OK  D:\ArkhamPack\ArkhamHorror\scripts\download-images.ps1
+  OK  D:\ArkhamPack\ArkhamHorror\scripts\repair-docker.ps1
+  OK  D:\ArkhamPack\arkham-deckbuilder\local-share-api.cjs
+Copilot said: 全部 OK，结构完全正确。 我注意到包里有几个多余的旧文件（`start-all.ps1`、`update-ip.ps1` 在根目录，还有 `make-pack.ps1`、`server.pem`、`server-key.pem`），这些不应该出现在朋友的包里。现在清理掉。 ## 第 20 步：运行这条命令（清理包里的多余文件） ```powershell $ah
+全部 OK，结构完全正确。
+
+我注意到包里有几个多余的旧文件（start-all.ps1、update-ip.ps1 在根目录，还有 make-pack.ps1、server.pem、server-key.pem），这些不应该出现在朋友的包里。现在清理掉。
+
+第 20 步：运行这条命令（清理包里的多余文件）
+PowerShell
+$ah = "D:\ArkhamPack\ArkhamHorror"
+
+# 删除不应分发的文件
+@(
+    "$ah\start-all.ps1",        # 旧版脚本（新版在 scripts\ 里）
+    "$ah\update-ip.ps1",        # 旧版脚本（新版在 scripts\ 里）
+    "$ah\make-pack.ps1",        # 打包工具，不需要分发
+    "$ah\server.pem",           # 证书是你自己的IP签的，朋友要重新生成
+    "$ah\server-key.pem",       # 同上
+    "$ah\cert.der",             # 旧证书文件
+    "$ah\cert.pem",             # 旧证书文件
+    "$ah\cert.pfx",             # 旧证书文件
+    "$ah\key.pem",              # 旧证书文件
+    "$ah\README-FIRST.txt"      # 根目录已有一份，ArkhamHorror 里不需要
+) | ForEach-Object {
+    if (Test-Path $_) {
+        Remove-Item $_ -Force
+        Write-Host "  已删除：$_" -ForegroundColor DarkGray
+    }
+}
+
+# 同时确保旧的 server.pem / server-key.pem 不在原始目录里泄露 IP 信息
+# （不删，保留给你自己用，但打包里不带）
+
+Write-Host ""
+Write-Host "清理完成" -ForegroundColor Green
+
+# 重新统计大小
+$size = [math]::Round((Get-ChildItem "D:\ArkhamPack" -Recurse -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum / 1GB, 2)
+Write-Host "当前包大小：${size} GB" -ForegroundColor Cyan
+运行完告诉我结果。
+
+You said: 运行完了
+运行完了
+Copilot said: 好，把输出贴给我看一下（特别是"当前包大小"那一行）。
+好，把输出贴给我看一下（特别是"当前包大小"那一行）。
+
+You said: PS C:\Users\MECHREV> $ah = "D:\ArkhamPack\ArkhamHorror" PS C:\Users\MECHREV> PS C:\Users\MECHREV>
+PS C:\Users\MECHREV> $ah = "D:\ArkhamPack\ArkhamHorror"
+PS C:\Users\MECHREV>
+PS C:\Users\MECHREV> # 删除不应分发的文件
+PS C:\Users\MECHREV> @(
+>>     "$ah\start-all.ps1",        # 旧版脚本（新版在 scripts\ 里）
+>>     "$ah\update-ip.ps1",        # 旧版脚本（新版在 scripts\ 里）
+>>     "$ah\make-pack.ps1",        # 打包工具，不需要分发
+>>     "$ah\server.pem",           # 证书是你自己的IP签的，朋友要重新生成
+>>     "$ah\server-key.pem",       # 同上
+>>     "$ah\cert.der",             # 旧证书文件
+>>     "$ah\cert.pem",             # 旧证书文件
+>>     "$ah\cert.pfx",             # 旧证书文件
+>>     "$ah\key.pem",              # 旧证书文件
+>>     "$ah\README-FIRST.txt"      # 根目录已有一份，ArkhamHorror 里不需要
+>> ) | ForEach-Object {
+>>     if (Test-Path $_) {
+>>         Remove-Item $_ -Force
+>>         Write-Host "  已删除：$_" -ForegroundColor DarkGray
+>>     }
+>> }
+  已删除：D:\ArkhamPack\ArkhamHorror\start-all.ps1
+  已删除：D:\ArkhamPack\ArkhamHorror\update-ip.ps1
+  已删除：D:\ArkhamPack\ArkhamHorror\make-pack.ps1
+  已删除：D:\ArkhamPack\ArkhamHorror\server.pem
+  已删除：D:\ArkhamPack\ArkhamHorror\server-key.pem
+  已删除：D:\ArkhamPack\ArkhamHorror\cert.der
+  已删除：D:\ArkhamPack\ArkhamHorror\cert.pem
+  已删除：D:\ArkhamPack\ArkhamHorror\cert.pfx
+  已删除：D:\ArkhamPack\ArkhamHorror\key.pem
+  已删除：D:\ArkhamPack\ArkhamHorror\README-FIRST.txt
+PS C:\Users\MECHREV>
+PS C:\Users\MECHREV> # 同时确保旧的 server.pem / server-key.pem 不在原始目录里泄露 IP 信息
+PS C:\Users\MECHREV> # （不删，保留给你自己用，但打包里不带）
+PS C:\Users\MECHREV>
+PS C:\Users\MECHREV> Write-Host ""
+
+PS C:\Users\MECHREV> Write-Host "清理完成" -ForegroundColor Green
+清理完成
+PS C:\Users\MECHREV>
+PS C:\Users\MECHREV> # 重新统计大小
+PS C:\Users\MECHREV> $size = [math]::Round((Get-ChildItem "D:\ArkhamPack" -Recurse -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum / 1GB, 2)
+PS C:\Users\MECHREV> Write-Host "当前包大小：${size} GB" -ForegroundColor Cyan
+当前包大小：0.29 GB
+Copilot said: 完美。0.29 GB，干干净净。 --- ## 全部完成！总结一下你做了什么 ### 包的结构 ``` D:\ArkhamPack\ ├── run.ps1
+完美。0.29 GB，干干净净。
+
+全部完成！总结一下你做了什么
+包的结构
+Code
+D:\ArkhamPack\
+├── run.ps1                          ← 朋友的总入口
+├── README-FIRST.txt                 ← 朋友第一眼看的说明
+├── ArkhamHorror\
+│   ├── docker-compose.yml
+│   ├── https-proxy.js               ← 已改为相对路径
+│   ├── voice-server.js              ← 已改为相对路径
+│   ├── mkcert.exe
+│   ├── frontend\                    ← 含 music/fonts，不含 img/node_modules/dist
+│   └── scripts\
+│       ├── install.ps1              ← 首次安装向导
+│       ├── start-all.ps1            ← 一键启动
+│       ├── update-ip.ps1            ← 换IP/重签证书
+│       ├── download-images.ps1      ← 离线图包下载
+│       └── repair-docker.ps1        ← 容器修复/备份
+└── arkham-deckbuilder\
+    ├── local-share-api.cjs
+    └── frontend\                    ← 含源码，不含 node_modules/dist
+发给朋友的步骤
+把 D:\ArkhamPack 压缩成 zip
+发给朋友
+朋友解压 → 右键 run.ps1 → 使用 PowerShell 运行 → 选 1 首次安装
+朋友需要提前装的东西
+Docker Desktop
+Node.js LTS
+还有一件事要确认：D:\ArkhamPack\ArkhamHorror\node_modules 是否存在（我之前没排除它）？
+
+PowerShell
+Test-Path "D:\ArkhamPack\ArkhamHorror\node_modules"
+Get-ChildItem "D:\ArkhamHorror\node_modules" -ErrorAction SilentlyContinue | Measure-Object | Select-Object -ExpandProperty Count
+贴一下结果。
+
+You said: PS C:\Users\MECHREV> Test-Path "D:\ArkhamPack\ArkhamHorror\node_modules" True PS C:\Users\MECHREV> Get-ChildItem "D:\ArkhamHorror\node_modules"
+PS C:\Users\MECHREV> Test-Path "D:\ArkhamPack\ArkhamHorror\node_modules"
+True
+PS C:\Users\MECHREV> Get-ChildItem "D:\ArkhamHorror\node_modules" -ErrorAction SilentlyContinue | Measure-Object | Select-Object -ExpandProperty Count
+3
+Copilot said: 好，`ArkhamHorror\node_modules` 存在但只有 3 个包，很小。看一下是什么： ```powershell Get-ChildItem "D:\ArkhamHorror\node_modules" | Select-Object
+好，ArkhamHorror\node_modules 存在但只有 3 个包，很小。看一下是什么：
+
+PowerShell
+Get-ChildItem "D:\ArkhamHorror\node_modules" | Select-Object Name
+You said: PS C:\Users\MECHREV> Get-ChildItem "D:\ArkhamHorror\node_modules" | Select-Object Name Name ---- .vite-temp ws .package-lock.json
+PS C:\Users\MECHREV> Get-ChildItem "D:\ArkhamHorror\node_modules" | Select-Object Name
+
+Name
+----
+.vite-temp
+ws
+.package-lock.json
+Copilot said: 只有 `ws`（WebSocket库）和 vite 临时文件，总共很小，而且 `voice-server.js` 和 `https-proxy.js`
+只有 ws（WebSocket库）和 vite 临时文件，总共很小，而且 voice-server.js 和 https-proxy.js 运行需要它。保留不动，不用排除。
+
+现在所有工作都完成了。可以压缩打包了：
+
+最后一步：压缩成 zip
+PowerShell
+Compress-Archive -Path "D:\ArkhamPack\*" -DestinationPath "D:\ArkhamPack.zip" -CompressionLevel Optimal
+Write-Host "压缩完成" -ForegroundColor Green
+$zipSize = [math]::Round((Get-Item "D:\ArkhamPack.zip").Length / 1GB, 2)
+Write-Host "zip 大小：${zipSize} GB" -ForegroundColor Cyan
+压缩完就可以把 D:\ArkhamPack.zip 发给朋友了。
+
+朋友收到后的完整流程
+Code
+1. 解压到任意位置（路径不要有中文）
+2. 安装 Docker Desktop + Node.js（如果没装过）
+3. 启动 Docker Desktop
+4. 右键 run.ps1 → 使用 PowerShell 运行
+5. 选 1（首次安装）→ 等待完成
+6. 以后每次选 2（一键启动）
+有问题随时贴报错给我。
+
+You said: D:\DockerDesktopWSL\disk特别大能不能清理
+D:\DockerDesktopWSL\disk特别大能不能清理
